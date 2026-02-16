@@ -1,0 +1,266 @@
+import { useCallback, useEffect, useState } from "react";
+import { useShop } from "../../../contexts/useShop";
+import { customersApi } from "../../../lib/api";
+import toast from "react-hot-toast";
+
+export default function CreditTab({ onNavigate }: { onNavigate: (path: string) => void }) {
+  const { currentShop } = useShop();
+  const currency = currentShop?.currency || "GHS";
+  const [data, setData] = useState<{
+    totalExposure: number;
+    count: number;
+    customersOwing: Array<{
+      id: string;
+      name: string;
+      phone?: string;
+      email?: string;
+      credit_balance: number;
+      credit_limit: number;
+    }>;
+  } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [paymentCustomerId, setPaymentCustomerId] = useState<string>("");
+  const [paymentAmount, setPaymentAmount] = useState<string>("");
+  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'mobile_money' | 'bank_transfer' | 'card'>('cash');
+  const [paymentNote, setPaymentNote] = useState<string>("");
+  const [submittingPayment, setSubmittingPayment] = useState(false);
+
+  const loadCreditSummary = useCallback(() => {
+    setLoading(true);
+    customersApi
+      .getCreditSummary()
+      .then((res) => {
+        setData(res.data.data);
+      })
+      .catch(() => {
+        setData({ totalExposure: 0, count: 0, customersOwing: [] });
+      })
+      .finally(() => {
+        setLoading(false);
+      });
+  }, []);
+
+  useEffect(() => {
+    loadCreditSummary();
+  }, [loadCreditSummary]);
+
+  const handleRecordPayment = async () => {
+    const customerId = paymentCustomerId || data?.customersOwing?.[0]?.id;
+    const amount = Number(paymentAmount);
+    if (!customerId) {
+      toast.error("Select a customer");
+      return;
+    }
+    if (!Number.isFinite(amount) || amount <= 0) {
+      toast.error("Enter a valid payment amount");
+      return;
+    }
+
+    setSubmittingPayment(true);
+    try {
+      await customersApi.recordPayment(customerId, {
+        amount,
+        payment_method: paymentMethod,
+        notes: paymentNote.trim() || undefined,
+      });
+      toast.success("Payment recorded");
+      setPaymentAmount("");
+      setPaymentNote("");
+      await loadCreditSummary();
+    } catch (error: any) {
+      const msg =
+        error?.response?.data?.error?.message ||
+        error?.response?.data?.message ||
+        error?.message ||
+        "Failed to record payment";
+      toast.error(msg);
+    } finally {
+      setSubmittingPayment(false);
+    }
+  };
+
+  const fmt = (n: number) => `${currency} ${Number(n).toFixed(2)}`;
+
+  return (
+    <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-6 sm:p-8 max-w-4xl">
+      <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
+        Credit & Customer Risk
+      </h2>
+      <p className="text-gray-600 dark:text-gray-400 text-sm mb-6">
+        Customers owing money, total credit exposure, due dates, reminders (SMS/WhatsApp), trust score.
+      </p>
+
+      {loading ? (
+        <div className="flex justify-center py-12">
+          <div className="h-8 w-8 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+        </div>
+      ) : (
+        <>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+            <div className="rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-900/50 p-4">
+              <p className="text-sm text-gray-500 dark:text-gray-400">Total credit exposure</p>
+              <p className="text-2xl font-bold text-gray-900 dark:text-white mt-1">
+                {fmt(data?.totalExposure ?? 0)}
+              </p>
+            </div>
+            <div className="rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-900/50 p-4">
+              <p className="text-sm text-gray-500 dark:text-gray-400">Customers owing money</p>
+              <p className="text-2xl font-bold text-gray-900 dark:text-white mt-1">{data?.count ?? 0}</p>
+            </div>
+          </div>
+
+          <div className="mb-6">
+            <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-3">
+              Customers owing money
+            </h3>
+            {!data?.customersOwing?.length ? (
+              <p className="text-gray-500 dark:text-gray-400 text-sm py-4">
+                No customers with outstanding credit. Use Sales with payment method Credit and link a
+                customer to track credit.
+              </p>
+            ) : (
+              <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-600">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 dark:bg-gray-900/50">
+                    <tr>
+                      <th className="text-left px-4 py-2 text-gray-700 dark:text-gray-300 font-medium">
+                        Name
+                      </th>
+                      <th className="text-left px-4 py-2 text-gray-700 dark:text-gray-300 font-medium">
+                        Contact
+                      </th>
+                      <th className="text-right px-4 py-2 text-gray-700 dark:text-gray-300 font-medium">
+                        Balance
+                      </th>
+                      <th className="text-right px-4 py-2 text-gray-700 dark:text-gray-300 font-medium">
+                        Limit
+                      </th>
+                      <th className="text-right px-4 py-2 text-gray-700 dark:text-gray-300 font-medium"></th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200 dark:divide-gray-600">
+                    {data.customersOwing.map((c) => (
+                      <tr key={c.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/30">
+                        <td className="px-4 py-2 text-gray-900 dark:text-white font-medium">
+                          {c.name}
+                        </td>
+                        <td className="px-4 py-2 text-gray-600 dark:text-gray-400">
+                          {c.phone || c.email || "—"}
+                        </td>
+                        <td className="px-4 py-2 text-right font-medium text-amber-600 dark:text-amber-400">
+                          {fmt(c.credit_balance)}
+                        </td>
+                        <td className="px-4 py-2 text-right text-gray-600 dark:text-gray-400">
+                          {fmt(c.credit_limit)}
+                        </td>
+                        <td className="px-4 py-2 text-right">
+                          <button
+                            type="button"
+                            onClick={() => onNavigate("/dashboard")}
+                            className="text-emerald-600 dark:text-emerald-400 hover:underline text-sm"
+                          >
+                            View customer
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          <div className="mb-6 p-4 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-900/40">
+            <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-3">Record customer payment</h3>
+            {!data?.customersOwing?.length ? (
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                No outstanding balances to collect right now.
+              </p>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="sm:col-span-2">
+                  <label className="block text-sm text-gray-600 dark:text-gray-300 mb-1">Customer</label>
+                  <select
+                    value={paymentCustomerId}
+                    onChange={(e) => setPaymentCustomerId(e.target.value)}
+                    className="w-full px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                  >
+                    <option value="">Select customer</option>
+                    {data.customersOwing.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name} ({fmt(c.credit_balance)} due)
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm text-gray-600 dark:text-gray-300 mb-1">Amount</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={paymentAmount}
+                    onChange={(e) => setPaymentAmount(e.target.value)}
+                    placeholder="0.00"
+                    className="w-full px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm text-gray-600 dark:text-gray-300 mb-1">Payment method</label>
+                  <select
+                    value={paymentMethod}
+                    onChange={(e) => setPaymentMethod(e.target.value as any)}
+                    className="w-full px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                  >
+                    <option value="cash">Cash</option>
+                    <option value="mobile_money">Mobile Money</option>
+                    <option value="card">Card</option>
+                    <option value="bank_transfer">Bank Transfer</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm text-gray-600 dark:text-gray-300 mb-1">Note (optional)</label>
+                  <input
+                    value={paymentNote}
+                    onChange={(e) => setPaymentNote(e.target.value)}
+                    placeholder="Reference or comment"
+                    className="w-full px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                  />
+                </div>
+              </div>
+            )}
+            {(data?.customersOwing?.length ?? 0) > 0 && (
+              <button
+                type="button"
+                onClick={handleRecordPayment}
+                disabled={submittingPayment}
+                className="mt-3 px-4 py-2 rounded-lg btn-primary-gradient disabled:opacity-60"
+              >
+                {submittingPayment ? "Recording..." : "Record payment"}
+              </button>
+            )}
+          </div>
+
+          <div className="border-t border-gray-200 dark:border-gray-600 pt-6 space-y-4">
+            <div>
+              <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Due dates & reminder status
+              </h3>
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                Coming soon: due dates per customer and SMS/WhatsApp reminders.
+              </p>
+            </div>
+            <div>
+              <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Trust score (history)
+              </h3>
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                Coming soon: trust score based on payment history.
+              </p>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}

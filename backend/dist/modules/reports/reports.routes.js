@@ -1,0 +1,20 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const reports_controller_1 = require("./reports.controller");
+const requireAuth_1 = require("../../middleware/requireAuth");
+const requireShop_1 = require("../../middleware/requireShop");
+const requireOwner_1 = require("../../middleware/requireOwner");
+const requireActiveSubscription_1 = require("../../middleware/requireActiveSubscription");
+const router = (0, express_1.Router)();
+const controller = new reports_controller_1.ReportsController();
+router.use(requireAuth_1.requireAuth);
+router.use(requireActiveSubscription_1.requireActiveSubscription);
+router.use(requireShop_1.requireShop);
+router.get('/dashboard', (req, res, next) => controller.getDashboardStats(req, res, next));
+router.get('/sales-intelligence', (req, res, next) => controller.getSalesIntelligence(req, res, next));
+router.get('/inventory-finance', requireOwner_1.requireOwner, (req, res, next) => controller.getInventoryFinance(req, res, next));
+router.get('/expenses-profit', (req, res, next) => controller.getExpensesProfit(req, res, next));
+router.get('/compliance-export', requireOwner_1.requireOwner, (req, res, next) => controller.getComplianceExport(req, res, next));
+exports.default = router;
+//# sourceMappingURL=reports.routes.js.map

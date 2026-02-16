@@ -1,0 +1,28 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const shops_controller_1 = require("./shops.controller");
+const requireAuth_1 = require("../../middleware/requireAuth");
+const requireShop_1 = require("../../middleware/requireShop");
+const requireOwner_1 = require("../../middleware/requireOwner");
+const requireDashboardEditToken_1 = require("../../middleware/requireDashboardEditToken");
+const requireActiveSubscription_1 = require("../../middleware/requireActiveSubscription");
+const router = (0, express_1.Router)();
+const controller = new shops_controller_1.ShopsController();
+router.use(requireAuth_1.requireAuth);
+router.use(requireActiveSubscription_1.requireActiveSubscription);
+router.post('/', (req, res, next) => controller.createShop(req, res, next));
+router.get('/my-shops', (req, res, next) => controller.getUserShops(req, res, next));
+router.post('/members', requireShop_1.requireShop, requireOwner_1.requireOwner, (req, res, next) => controller.addMember(req, res, next));
+router.get('/members', requireShop_1.requireShop, requireOwner_1.requireOwner, (req, res, next) => controller.getShopMembers(req, res, next));
+router.delete('/members/:userId', requireShop_1.requireShop, requireOwner_1.requireOwner, (req, res, next) => controller.removeMember(req, res, next));
+router.post('/transfer-ownership', requireShop_1.requireShop, requireOwner_1.requireOwner, (req, res, next) => controller.transferOwnership(req, res, next));
+router.post('/request-clear-data-pin', requireShop_1.requireShop, requireOwner_1.requireOwner, (req, res, next) => controller.requestClearDataPin(req, res, next));
+router.post('/confirm-dashboard-edit', requireShop_1.requireShop, requireOwner_1.requireOwner, (req, res, next) => controller.confirmDashboardEdit(req, res, next));
+router.post('/clear-dashboard-data', requireShop_1.requireShop, requireOwner_1.requireOwner, requireDashboardEditToken_1.requireDashboardEditToken, (req, res, next) => controller.clearDashboardData(req, res, next));
+router.post('/reset-dashboard-view', requireShop_1.requireShop, requireOwner_1.requireOwner, requireDashboardEditToken_1.requireDashboardEditToken, (req, res, next) => controller.resetDashboardView(req, res, next));
+router.get('/:id', (req, res, next) => controller.getShop(req, res, next));
+router.patch('/:id', (req, res, next) => controller.updateShop(req, res, next));
+router.delete('/:id', (req, res, next) => controller.deleteShop(req, res, next));
+exports.default = router;
+//# sourceMappingURL=shops.routes.js.map

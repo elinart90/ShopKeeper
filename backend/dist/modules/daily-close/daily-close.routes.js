@@ -1,0 +1,21 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const daily_close_controller_1 = require("./daily-close.controller");
+const requireAuth_1 = require("../../middleware/requireAuth");
+const requireShop_1 = require("../../middleware/requireShop");
+const requireOwner_1 = require("../../middleware/requireOwner");
+const requireActiveSubscription_1 = require("../../middleware/requireActiveSubscription");
+const router = (0, express_1.Router)();
+const controller = new daily_close_controller_1.DailyCloseController();
+router.use(requireAuth_1.requireAuth);
+router.use(requireActiveSubscription_1.requireActiveSubscription);
+router.use(requireShop_1.requireShop);
+router.use(requireOwner_1.requireOwner);
+router.post('/', (req, res, next) => controller.create(req, res, next));
+router.get('/', (req, res, next) => controller.getRecent(req, res, next));
+router.get('/by-date', (req, res, next) => controller.getByDate(req, res, next));
+router.post('/:id/approve', (req, res, next) => controller.approve(req, res, next));
+router.post('/:id/reject', (req, res, next) => controller.reject(req, res, next));
+exports.default = router;
+//# sourceMappingURL=daily-close.routes.js.map

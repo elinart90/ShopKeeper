@@ -1,0 +1,20 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const wallets_controller_1 = require("./wallets.controller");
+const requireAuth_1 = require("../../middleware/requireAuth");
+const requireShop_1 = require("../../middleware/requireShop");
+const requireOwner_1 = require("../../middleware/requireOwner");
+const requireActiveSubscription_1 = require("../../middleware/requireActiveSubscription");
+const router = (0, express_1.Router)();
+const controller = new wallets_controller_1.WalletsController();
+router.use(requireAuth_1.requireAuth);
+router.use(requireActiveSubscription_1.requireActiveSubscription);
+router.use(requireShop_1.requireShop);
+router.use(requireOwner_1.requireOwner);
+router.get('/', (req, res, next) => controller.getWallets(req, res, next));
+router.get('/transactions', (req, res, next) => controller.getTransactions(req, res, next));
+router.post('/adjust', (req, res, next) => controller.adjustBalance(req, res, next));
+router.post('/transfer', (req, res, next) => controller.transfer(req, res, next));
+exports.default = router;
+//# sourceMappingURL=wallets.routes.js.map

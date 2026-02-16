@@ -1,0 +1,139 @@
+/* African-inspired CSS variables */
+:root {
+  /* Colors */
+  --color-primary: #2563EB;
+  --color-primary-dark: #1E40AF;
+  --color-secondary: #10B981;
+  --color-accent: #F59E0B;
+  --color-danger: #DC2626;
+  
+  /* Backgrounds */
+  --bg-light: #F8FAFC;
+  --bg-dark: #0F172A;
+  
+  /* Typography */
+  --font-size-small: 0.875rem;  /* 14px */
+  --font-size-base: 1rem;       /* 16px */
+  --font-size-large: 1.125rem;  /* 18px */
+  --font-size-xlarge: 1.25rem;  /* 20px */
+  
+  /* Spacing */
+  --spacing-touch: 44px;
+  --spacing-container: 1rem;
+  
+  /* Shadows */
+  --shadow-soft: 0 2px 15px -3px rgba(0, 0, 0, 0.07);
+  --shadow-card: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  
+  /* Transitions */
+  --transition-fast: 150ms ease;
+  --transition-normal: 250ms ease;
+  --transition-slow: 350ms ease;
+}
+
+/* High contrast mode for accessibility */
+@media (prefers-contrast: high) {
+  :root {
+    --color-primary: #1D4ED8;
+    --color-secondary: #047857;
+    --color-accent: #D97706;
+    --color-danger: #B91C1C;
+  }
+}
+
+/* Reduce motion for users who prefer it */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+
+
+/* Add to your existing CSS */
+
+/* Custom animations */
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+.animate-float {
+  animation: float 3s ease-in-out infinite;
+}
+
+/* Smooth transitions */
+* {
+  transition: background-color 0.3s ease, border-color 0.3s ease;
+}
+
+/* Focus styles */
+input:focus, button:focus {
+  @apply outline-none ring-2 ring-offset-2;
+}
+
+input:focus {
+  @apply ring-indigo-500/30;
+}
+
+button:focus {
+  @apply ring-indigo-500/50;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-gray-100;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-gray-300 rounded-full;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-gray-400;
+}
+
+/* Mobile optimizations */
+@media (max-width: 640px) {
+  .text-4xl {
+    font-size: 2.5rem;
+  }
+  
+  .text-2xl {
+    font-size: 1.75rem;
+  }
+  
+  .px-8 {
+    padding-left: 1.5rem;
+    padding-right: 1.5rem;
+  }
+  
+  .py-4 {
+    padding-top: 1rem;
+    padding-bottom: 1rem;
+  }
+}
+
+/* Loading spinner */
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
