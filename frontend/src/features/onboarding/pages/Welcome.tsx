@@ -1,7 +1,7 @@
 // src/components/welcome/Welcome.tsx
 import { useMemo, useState } from "react";
 import { ShieldCheck, Smartphone, BarChart3, Package, TrendingUp, Zap, PieChart } from "lucide-react";
-import { useNavigate } from "react-router-dom"; // Add this import
+import { useNavigate } from "react-router-dom";
 import logo from "../../../assets/shopkeeper-logo.png";
 
 // type WelcomeProps = {
@@ -125,8 +125,7 @@ export default function Welcome() {
             
             {/* Logo box */}
             <div className="relative rounded-2xl bg-white/95 backdrop-blur-sm p-4 sm:p-6 shadow-2xl border-2 border-white/40">
-              {logo ? (
-                <div className="flex items-center justify-center">
+              <div className="flex items-center justify-center">
                   <img
                     src={logo}
                     alt="ShoopKeeper logo"
@@ -151,14 +150,6 @@ export default function Welcome() {
                     }}
                   />
                 </div>
-              ) : (
-                <div className="text-center">
-                  <div className="text-3xl sm:text-4xl font-bold bg-gradient-to-r from-emerald-600 to-blue-600 bg-clip-text text-transparent">
-                    ShoopKeeper
-                  </div>
-                  <div className="text-sm text-gray-600 mt-1">Sell Smarter, Grow Faster</div>
-                </div>
-              )}
             </div>
 
             {/* Trust badge - positioned absolutely within the colored section */}
