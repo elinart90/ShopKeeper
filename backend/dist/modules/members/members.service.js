@@ -88,6 +88,62 @@ class MembersService {
             customersOwing,
         };
     }
+    /** Record customer credit repayment, reduce balance, and post to sales for dashboard visibility. */
+    async recordCreditPayment(customerId, shopId, userId, amount, paymentMethod, notes) {
+        const customer = await this.getCustomerById(customerId);
+        if (String(customer.shop_id) !== String(shopId)) {
+            throw new Error('Customer not found');
+        }
+        const currentBalance = Number(customer.credit_balance || 0);
+        if (currentBalance <= 0) {
+            throw new Error('Customer has no outstanding credit');
+        }
+        const paymentAmount = Number(amount);
+        if (!Number.isFinite(paymentAmount) || paymentAmount <= 0) {
+            throw new Error('Invalid payment amount');
+        }
+        const normalizedMethod = String(paymentMethod || 'cash').toLowerCase();
+        if (!MembersService.ALLOWED_PAYMENT_METHODS.includes(normalizedMethod)) {
+            throw new Error('Invalid payment method');
+        }
+        const newBalance = Math.max(0, Number((currentBalance - paymentAmount).toFixed(2)));
+        const { data: updated, error } = await supabase_1.supabase
+            .from('customers')
+            .update({
+            credit_balance: newBalance,
+            updated_at: new Date().toISOString(),
+        })
+            .eq('id', customerId)
+            .eq('shop_id', shopId)
+            .select('*')
+            .single();
+        if (error) {
+            logger_1.logger.error('Error recording customer credit payment:', error);
+            throw new Error('Failed to record payment');
+        }
+        const saleNumber = `CRPAY-${Date.now().toString(36).toUpperCase()}`;
+        const { error: saleError } = await supabase_1.supabase.from('sales').insert({
+            shop_id: shopId,
+            customer_id: customerId,
+            sale_number: saleNumber,
+            total_amount: paymentAmount,
+            discount_amount: 0,
+            tax_amount: 0,
+            final_amount: paymentAmount,
+            payment_method: normalizedMethod,
+            status: 'completed',
+            notes: notes?.trim()
+                ? `[CREDIT_REPAYMENT] Credit repayment: ${notes.trim()}`
+                : '[CREDIT_REPAYMENT] Credit repayment',
+            created_by: userId,
+        });
+        if (saleError) {
+            logger_1.logger.error('Error posting credit repayment to sales:', saleError);
+            // Keep payment applied even if mirror sales record fails.
+        }
+        return updated;
+    }
 }
 exports.MembersService = MembersService;
+MembersService.ALLOWED_PAYMENT_METHODS = ['cash', 'mobile_money', 'bank_transfer', 'card'];
 //# sourceMappingURL=members.service.js.map

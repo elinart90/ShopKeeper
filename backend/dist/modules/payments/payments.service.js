@@ -37,9 +37,13 @@ exports.PaymentsService = void 0;
 const supabase_1 = require("../../config/supabase");
 const env_1 = require("../../config/env");
 const logger_1 = require("../../utils/logger");
+const subscriptions_service_1 = require("../subscriptions/subscriptions.service");
 const PAYSTACK_BASE = 'https://api.paystack.co';
 const PURPOSES = ['subscription', 'topup', 'invoice', 'order'];
 class PaymentsService {
+    constructor() {
+        this.subscriptionsService = new subscriptions_service_1.SubscriptionsService();
+    }
     getSecretKey() {
         const key = env_1.env.paystackSecretKey;
         if (!key)
@@ -185,6 +189,9 @@ class PaymentsService {
         const payload = JSON.parse(rawBody.toString());
         if (payload.event === 'charge.success' && payload.data?.reference) {
             const ref = payload.data.reference;
+            const wasSubscription = await this.tryProcessSubscriptionChargeSuccess(payload.data);
+            if (wasSubscription)
+                return;
             const { data: existing } = await supabase_1.supabase
                 .from('payments')
                 .select('id')
@@ -194,6 +201,79 @@ class PaymentsService {
                 return;
             await this.verify(ref);
         }
+        if (payload.event === 'charge.failed' && payload.data) {
+            await this.tryProcessSubscriptionChargeFailed(payload.data);
+        }
+    }
+    async resolveUserIdFromSubscriptionWebhook(data) {
+        const fromMetadata = data.metadata?.user_id;
+        if (typeof fromMetadata === 'string' && fromMetadata.trim()) {
+            return fromMetadata.trim();
+        }
+        const email = data.customer?.email ? String(data.customer.email).trim().toLowerCase() : '';
+        if (!email)
+            return null;
+        const { data: user } = await supabase_1.supabase
+            .from('users')
+            .select('id')
+            .eq('email', email)
+            .maybeSingle();
+        return user?.id ? String(user.id) : null;
+    }
+    async tryProcessSubscriptionChargeSuccess(data) {
+        const metadataPurpose = String(data.metadata?.purpose || '').toLowerCase();
+        const looksLikeSubscription = metadataPurpose === 'subscription' ||
+            !!data.subscription?.subscription_code ||
+            String(data.plan?.interval || '').toLowerCase() === 'monthly';
+        if (!looksLikeSubscription)
+            return false;
+        if (!data.reference)
+            return true;
+        const userId = await this.resolveUserIdFromSubscriptionWebhook(data);
+        if (!userId) {
+            logger_1.logger.warn('Subscription webhook received but user could not be resolved', data.reference);
+            return true;
+        }
+        const planCodeFromMetadata = data.metadata?.plan_code;
+        const planCodeFromPlan = data.plan?.plan_code;
+        const planCode = (typeof planCodeFromMetadata === 'string' && planCodeFromMetadata) ||
+            (typeof planCodeFromPlan === 'string' && planCodeFromPlan) ||
+            undefined;
+        const billingCycleFromMetadata = data.metadata?.billing_cycle;
+        const billingCycleFromPlanInterval = data.plan?.interval;
+        const billingCycle = (typeof billingCycleFromMetadata === 'string' && billingCycleFromMetadata.toLowerCase() === 'yearly')
+            ? 'yearly'
+            : (typeof billingCycleFromPlanInterval === 'string' && billingCycleFromPlanInterval.toLowerCase() === 'yearly')
+                ? 'yearly'
+                : 'monthly';
+        const amountMinor = Number(data.amount ?? 0);
+        if (!Number.isFinite(amountMinor) || amountMinor <= 0) {
+            logger_1.logger.warn('Subscription webhook missing valid amount', data.reference);
+            return true;
+        }
+        await this.subscriptionsService.activateFromSuccessfulCharge({
+            userId,
+            reference: data.reference,
+            amountMinor,
+            currency: data.currency || 'GHS',
+            paidAtIso: data.paid_at,
+            planCode,
+            billingCycle,
+            rawPayload: data,
+        });
+        return true;
+    }
+    async tryProcessSubscriptionChargeFailed(data) {
+        const metadataPurpose = String(data.metadata?.purpose || '').toLowerCase();
+        const looksLikeSubscription = metadataPurpose === 'subscription' ||
+            !!data.subscription?.subscription_code ||
+            String(data.plan?.interval || '').toLowerCase() === 'monthly';
+        if (!looksLikeSubscription)
+            return;
+        const userId = await this.resolveUserIdFromSubscriptionWebhook(data);
+        if (!userId)
+            return;
+        await this.subscriptionsService.markPastDue(userId);
     }
 }
 exports.PaymentsService = PaymentsService;

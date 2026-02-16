@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.ShopsController = void 0;
 const shops_service_1 = require("./shops.service");
 const errorHandler_1 = require("../../middleware/errorHandler");
+const params_1 = require("../../utils/params");
 const shopsService = new shops_service_1.ShopsService();
 class ShopsController {
     async createShop(req, res, next) {
@@ -19,7 +20,7 @@ class ShopsController {
     }
     async getShop(req, res, next) {
         try {
-            const { id } = req.params;
+            const id = (0, params_1.getParam)(req, 'id');
             const shop = await shopsService.getShopById(id);
             res.json({ success: true, data: shop });
         }
@@ -44,7 +45,7 @@ class ShopsController {
             if (!req.userId) {
                 throw new errorHandler_1.AppError('User ID is required', 401);
             }
-            const { id } = req.params;
+            const id = (0, params_1.getParam)(req, 'id');
             const shop = await shopsService.updateShop(id, req.userId, req.body);
             res.json({ success: true, data: shop });
         }
@@ -57,7 +58,7 @@ class ShopsController {
             if (!req.userId) {
                 throw new errorHandler_1.AppError('User ID is required', 401);
             }
-            const { id } = req.params;
+            const id = (0, params_1.getParam)(req, 'id');
             await shopsService.deleteShop(id, req.userId);
             res.json({ success: true, data: { deleted: true } });
         }
@@ -103,7 +104,7 @@ class ShopsController {
             if (!req.shopId || !req.userId) {
                 throw new errorHandler_1.AppError('Shop ID and User ID are required', 400);
             }
-            const { userId: memberUserId } = req.params;
+            const memberUserId = (0, params_1.getParam)(req, 'userId');
             if (!memberUserId)
                 throw new errorHandler_1.AppError('Member user ID is required', 400);
             await shopsService.removeMember(req.shopId, memberUserId, req.userId);

@@ -5,6 +5,7 @@ const inventory_controller_1 = require("./inventory.controller");
 const requireAuth_1 = require("../../middleware/requireAuth");
 const requireShop_1 = require("../../middleware/requireShop");
 const requireActiveSubscription_1 = require("../../middleware/requireActiveSubscription");
+const requireOwner_1 = require("../../middleware/requireOwner");
 const router = (0, express_1.Router)();
 const controller = new inventory_controller_1.InventoryController();
 router.use(requireAuth_1.requireAuth);
@@ -22,7 +23,7 @@ router.post('/products/:id/receive-stock', (req, res, next) => controller.receiv
 router.delete('/products/:id', (req, res, next) => controller.deleteProduct(req, res, next));
 router.get('/products/:id/history', (req, res, next) => controller.getStockHistory(req, res, next));
 // Categories
-router.post('/categories', (req, res, next) => controller.createCategory(req, res, next));
+router.post('/categories', requireOwner_1.requireOwner, (req, res, next) => controller.createCategory(req, res, next));
 router.get('/categories', (req, res, next) => controller.getCategories(req, res, next));
 exports.default = router;
 //# sourceMappingURL=inventory.routes.js.map

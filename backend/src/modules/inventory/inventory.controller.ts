@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { InventoryService } from './inventory.service';
 import { ShopRequest } from '../../middleware/requireShop';
 import { errorHandler, AppError } from '../../middleware/errorHandler';
+import { getParam } from '../../utils/params';
 
 const inventoryService = new InventoryService();
 
@@ -34,7 +35,7 @@ export class InventoryController {
 
   async getProduct(req: Request, res: Response, next: NextFunction) {
     try {
-      const { id } = req.params;
+      const id = getParam(req, 'id');
       const product = await inventoryService.getProductById(id);
       res.json({ success: true, data: product });
     } catch (error) {
@@ -48,7 +49,7 @@ export class InventoryController {
         throw new AppError('Shop ID is required', 400);
       }
 
-      const { barcode } = req.params;
+      const barcode = getParam(req, 'barcode');
       const product = await inventoryService.getProductByBarcode(req.shopId, barcode);
 
       if (!product) {
@@ -76,7 +77,7 @@ export class InventoryController {
   async receiveStock(req: ShopRequest, res: Response, next: NextFunction) {
     try {
       if (!req.shopId || !req.userId) throw new AppError('Shop ID and User ID required', 400);
-      const { id } = req.params;
+      const id = getParam(req, 'id');
       const { quantity, note } = req.body || {};
       const qty = Number(quantity);
       if (!Number.isFinite(qty) || qty <= 0) throw new AppError('Valid quantity required', 400);
@@ -93,7 +94,7 @@ export class InventoryController {
         throw new AppError('Shop ID and User ID are required', 400);
       }
 
-      const { id } = req.params;
+      const id = getParam(req, 'id');
       const product = await inventoryService.updateProduct(id, req.shopId, req.userId, req.body);
       res.json({ success: true, data: product });
     } catch (error) {
@@ -107,7 +108,7 @@ export class InventoryController {
         throw new AppError('Shop ID is required', 400);
       }
 
-      const { id } = req.params;
+      const id = getParam(req, 'id');
       await inventoryService.deleteProduct(id, req.shopId);
       res.json({ success: true, message: 'Product deleted' });
     } catch (error) {
@@ -130,7 +131,7 @@ export class InventoryController {
 
   async getStockHistory(req: Request, res: Response, next: NextFunction) {
     try {
-      const { id } = req.params;
+      const id = getParam(req, 'id');
       const limit = parseInt(req.query.limit as string) || 50;
       const history = await inventoryService.getStockHistory(id, limit);
       res.json({ success: true, data: history });

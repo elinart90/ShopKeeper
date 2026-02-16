@@ -3,6 +3,7 @@ import { ShopsService } from './shops.service';
 import { AuthRequest } from '../../middleware/requireAuth';
 import { ShopRequest } from '../../middleware/requireShop';
 import { errorHandler, AppError } from '../../middleware/errorHandler';
+import { getParam } from '../../utils/params';
 
 const shopsService = new ShopsService();
 
@@ -21,7 +22,7 @@ export class ShopsController {
 
   async getShop(req: Request, res: Response, next: NextFunction) {
     try {
-      const { id } = req.params;
+      const id = getParam(req, 'id');
       const shop = await shopsService.getShopById(id);
       res.json({ success: true, data: shop });
     } catch (error) {
@@ -46,7 +47,7 @@ export class ShopsController {
       if (!req.userId) {
         throw new AppError('User ID is required', 401);
       }
-      const { id } = req.params;
+      const id = getParam(req, 'id');
       const shop = await shopsService.updateShop(id, req.userId, req.body);
       res.json({ success: true, data: shop });
     } catch (error) {
@@ -59,7 +60,7 @@ export class ShopsController {
       if (!req.userId) {
         throw new AppError('User ID is required', 401);
       }
-      const { id } = req.params;
+      const id = getParam(req, 'id');
       await shopsService.deleteShop(id, req.userId);
       res.json({ success: true, data: { deleted: true } });
     } catch (error) {
@@ -105,7 +106,7 @@ export class ShopsController {
       if (!req.shopId || !req.userId) {
         throw new AppError('Shop ID and User ID are required', 400);
       }
-      const { userId: memberUserId } = req.params;
+      const memberUserId = getParam(req, 'userId');
       if (!memberUserId) throw new AppError('Member user ID is required', 400);
       await shopsService.removeMember(req.shopId, memberUserId, req.userId);
       res.json({ success: true, data: { removed: true } });

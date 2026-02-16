@@ -14,6 +14,7 @@ export interface InitializeResult {
     reference: string;
 }
 export declare class PaymentsService {
+    private readonly subscriptionsService;
     private getSecretKey;
     initialize(input: InitializeInput): Promise<InitializeResult>;
     verify(reference: string): Promise<{
@@ -22,6 +23,9 @@ export declare class PaymentsService {
     }>;
     getWebhookSecret(): string;
     processWebhook(rawBody: Buffer, signature: string): Promise<void>;
+    private resolveUserIdFromSubscriptionWebhook;
+    private tryProcessSubscriptionChargeSuccess;
+    private tryProcessSubscriptionChargeFailed;
 }
 export {};
 //# sourceMappingURL=payments.service.d.ts.map

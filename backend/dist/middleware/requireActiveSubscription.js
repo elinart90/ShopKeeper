@@ -14,7 +14,9 @@ async function requireActiveSubscription(req, res, next) {
     try {
         if (!req.userId)
             throw createHttpError('Unauthorized', 401);
-        const status = await subscriptionsService.getStatus(req.userId);
+        const shopIdHeader = req.headers['x-shop-id'];
+        const shopId = typeof shopIdHeader === 'string' ? shopIdHeader : undefined;
+        const status = await subscriptionsService.getStatus(req.userId, shopId);
         req.subscription = status;
         if (!status.isActive) {
             throw createHttpError('Active monthly subscription is required to use this app', 402, 'SUBSCRIPTION_REQUIRED');

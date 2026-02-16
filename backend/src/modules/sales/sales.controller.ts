@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { SalesService } from './sales.service';
 import { ShopRequest } from '../../middleware/requireShop';
 import { errorHandler, AppError } from '../../middleware/errorHandler';
+import { getParam } from '../../utils/params';
 
 const salesService = new SalesService();
 
@@ -34,7 +35,7 @@ export class SalesController {
 
   async getSale(req: Request, res: Response, next: NextFunction) {
     try {
-      const { id } = req.params;
+      const id = getParam(req, 'id');
       const sale = await salesService.getSaleById(id);
       res.json({ success: true, data: sale });
     } catch (error) {
@@ -65,7 +66,7 @@ export class SalesController {
         throw new AppError('Shop ID and User ID are required', 400);
       }
 
-      const { id } = req.params;
+      const id = getParam(req, 'id');
       const sale = await salesService.cancelSale(id, req.shopId, req.userId);
       res.json({ success: true, data: sale });
     } catch (error) {

@@ -26,7 +26,7 @@ class ReportsService {
             const effectiveStart = dataClearedAt && (!startTs || dataClearedAt > startTs) ? dataClearedAt : startTs;
             let salesQuery = supabase_1.supabase
                 .from('sales')
-                .select('final_amount, payment_method, created_at, created_by')
+                .select('id, final_amount, payment_method, created_at, created_by')
                 .eq('shop_id', shopId)
                 .eq('status', 'completed');
             if (effectiveStart)
@@ -37,6 +37,35 @@ class ReportsService {
             const filteredSales = sales || [];
             const totalSales = filteredSales.reduce((sum, s) => sum + Number(s.final_amount), 0);
             const totalTransactions = filteredSales.length;
+            const saleIds = filteredSales.map((s) => s.id).filter(Boolean);
+            // Sales profit (gross profit) = sum of sold item totals - item costs (cost_price * quantity).
+            // This keeps the dashboard profit tied to actual sales made in the selected period.
+            let salesProfit = 0;
+            if (saleIds.length > 0) {
+                const { data: saleItems } = await supabase_1.supabase
+                    .from('sale_items')
+                    .select('product_id, quantity, total_price')
+                    .in('sale_id', saleIds);
+                const items = (saleItems || []);
+                const productIds = Array.from(new Set(items.map((i) => i.product_id).filter(Boolean)));
+                let costByProductId = {};
+                if (productIds.length > 0) {
+                    const { data: products } = await supabase_1.supabase
+                        .from('products')
+                        .select('id, cost_price')
+                        .in('id', productIds);
+                    costByProductId = (products || []).reduce((acc, p) => {
+                        acc[p.id] = Number(p.cost_price || 0);
+                        return acc;
+                    }, {});
+                }
+                salesProfit = items.reduce((sum, item) => {
+                    const lineRevenue = Number(item.total_price || 0);
+                    const unitCost = Number(costByProductId[item.product_id] || 0);
+                    const lineCost = unitCost * Number(item.quantity || 0);
+                    return sum + (lineRevenue - lineCost);
+                }, 0);
+            }
             const paymentMethodBreakdown = filteredSales.reduce((acc, s) => {
                 const method = s.payment_method || 'cash';
                 acc[method] = (acc[method] || 0) + Number(s.final_amount || 0);
@@ -67,6 +96,7 @@ class ReportsService {
                 totalSales,
                 totalExpenses,
                 profit,
+                salesProfit,
                 totalTransactions,
                 lowStockCount,
                 averageTransaction: totalTransactions > 0 ? totalSales / totalTransactions : 0,
@@ -284,6 +314,34 @@ class ReportsService {
     }
     async getExpensesProfitReport(shopId, startDate, endDate) {
         try {
+            const computeSalesProfitForSaleIds = async (saleIds) => {
+                if (!saleIds.length)
+                    return 0;
+                const { data: saleItems } = await supabase_1.supabase
+                    .from('sale_items')
+                    .select('product_id, quantity, total_price')
+                    .in('sale_id', saleIds);
+                const items = (saleItems || []);
+                if (!items.length)
+                    return 0;
+                const productIds = Array.from(new Set(items.map((i) => i.product_id).filter(Boolean)));
+                let costByProductId = {};
+                if (productIds.length > 0) {
+                    const { data: products } = await supabase_1.supabase
+                        .from('products')
+                        .select('id, cost_price')
+                        .in('id', productIds);
+                    costByProductId = (products || []).reduce((acc, p) => {
+                        acc[p.id] = Number(p.cost_price || 0);
+                        return acc;
+                    }, {});
+                }
+                return items.reduce((sum, item) => {
+                    const lineRevenue = Number(item.total_price || 0);
+                    const lineCost = Number(costByProductId[item.product_id] || 0) * Number(item.quantity || 0);
+                    return sum + (lineRevenue - lineCost);
+                }, 0);
+            };
             const { start: startTs, end: endTs } = toDateRange(startDate, endDate);
             const dataClearedAt = await getDataClearedAt(shopId);
             const effectiveStart = dataClearedAt && (!startTs || dataClearedAt > startTs) ? dataClearedAt : startTs;
@@ -291,7 +349,7 @@ class ReportsService {
             const effectiveExpenseStart = clearedDateOnly && (!startDate || clearedDateOnly > startDate) ? clearedDateOnly : startDate;
             let salesQuery = supabase_1.supabase
                 .from('sales')
-                .select('final_amount, created_at')
+                .select('id, final_amount, created_at')
                 .eq('shop_id', shopId)
                 .eq('status', 'completed');
             if (effectiveStart)
@@ -301,6 +359,7 @@ class ReportsService {
             const { data: sales } = await salesQuery;
             const salesList = sales || [];
             const totalRevenue = salesList.reduce((s, r) => s + Number(r.final_amount || 0), 0);
+            const salesProfit = await computeSalesProfitForSaleIds(salesList.map((s) => s.id).filter(Boolean));
             let expensesQuery = supabase_1.supabase
                 .from('expenses')
                 .select('amount, expense_date, category_id, category:expense_categories(name)')
@@ -312,7 +371,7 @@ class ReportsService {
             const { data: expenses } = await expensesQuery;
             const expensesList = expenses || [];
             const totalExpenses = expensesList.reduce((s, e) => s + Number(e.amount || 0), 0);
-            const netProfit = totalRevenue - totalExpenses;
+            const netProfit = salesProfit - totalExpenses;
             const expenseVsRevenueRatio = totalRevenue > 0 ? totalExpenses / totalRevenue : 0;
             const byCategory = {};
             expensesList.forEach((e) => {
@@ -330,11 +389,21 @@ class ReportsService {
                 count: v.count,
             })).sort((a, b) => b.amount - a.amount);
             const revenueByDay = {};
+            const saleIdsByDay = {};
             salesList.forEach((s) => {
                 const day = (s.created_at || '').slice(0, 10);
-                if (day)
+                if (day) {
                     revenueByDay[day] = (revenueByDay[day] || 0) + Number(s.final_amount || 0);
+                    if (!saleIdsByDay[day])
+                        saleIdsByDay[day] = [];
+                    if (s.id)
+                        saleIdsByDay[day].push(String(s.id));
+                }
             });
+            const salesProfitByDay = {};
+            for (const [day, ids] of Object.entries(saleIdsByDay)) {
+                salesProfitByDay[day] = await computeSalesProfitForSaleIds(ids);
+            }
             const expensesByDay = {};
             expensesList.forEach((e) => {
                 const day = (e.expense_date || '').toString().slice(0, 10);
@@ -347,8 +416,9 @@ class ReportsService {
                 .map((date) => ({
                 date,
                 revenue: revenueByDay[date] || 0,
+                salesProfit: salesProfitByDay[date] || 0,
                 expenses: expensesByDay[date] || 0,
-                profit: (revenueByDay[date] || 0) - (expensesByDay[date] || 0),
+                profit: (salesProfitByDay[date] || 0) - (expensesByDay[date] || 0),
             }));
             const now = new Date();
             const monthlyTrend = [];
@@ -362,12 +432,13 @@ class ReportsService {
                 const monthLabel = monthEnd.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
                 const { data: ms } = await supabase_1.supabase
                     .from('sales')
-                    .select('final_amount')
+                    .select('id, final_amount')
                     .eq('shop_id', shopId)
                     .eq('status', 'completed')
                     .gte('created_at', `${monthStart}T00:00:00.000Z`)
                     .lte('created_at', `${monthEndStr}T23:59:59.999Z`);
                 const monthRevenue = (ms || []).reduce((s, r) => s + Number(r.final_amount || 0), 0);
+                const monthSalesProfit = await computeSalesProfitForSaleIds((ms || []).map((r) => r.id).filter(Boolean));
                 const { data: me } = await supabase_1.supabase
                     .from('expenses')
                     .select('amount')
@@ -380,12 +451,14 @@ class ReportsService {
                     year: y,
                     monthLabel,
                     revenue: monthRevenue,
+                    salesProfit: monthSalesProfit,
                     expenses: monthExpenses,
-                    profit: monthRevenue - monthExpenses,
+                    profit: monthSalesProfit - monthExpenses,
                 });
             }
             return {
                 totalRevenue,
+                salesProfit,
                 totalExpenses,
                 netProfit,
                 expenseVsRevenueRatio,

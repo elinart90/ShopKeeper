@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { MembersService } from './members.service';
 import { ShopRequest } from '../../middleware/requireShop';
 import { errorHandler, AppError } from '../../middleware/errorHandler';
+import { getParam } from '../../utils/params';
 
 const membersService = new MembersService();
 
@@ -34,7 +35,7 @@ export class MembersController {
 
   async getCustomer(req: Request, res: Response, next: NextFunction) {
     try {
-      const { id } = req.params;
+      const id = getParam(req, 'id');
       const customer = await membersService.getCustomerById(id);
       res.json({ success: true, data: customer });
     } catch (error) {
@@ -48,7 +49,7 @@ export class MembersController {
         throw new AppError('Shop ID is required', 400);
       }
 
-      const { id } = req.params;
+      const id = getParam(req, 'id');
       const customer = await membersService.updateCustomer(id, req.shopId, req.body);
       res.json({ success: true, data: customer });
     } catch (error) {
@@ -74,7 +75,7 @@ export class MembersController {
       if (!req.shopId) {
         throw new AppError('Shop ID is required', 400);
       }
-      const { id } = req.params;
+      const id = getParam(req, 'id');
       const amount = Number(req.body?.amount);
       const paymentMethod = String(req.body?.payment_method || 'cash');
       const notes = typeof req.body?.notes === 'string' ? req.body.notes : undefined;

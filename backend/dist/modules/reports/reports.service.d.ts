@@ -3,6 +3,7 @@ export declare class ReportsService {
         totalSales: number;
         totalExpenses: number;
         profit: number;
+        salesProfit: number;
         totalTransactions: number;
         lowStockCount: number;
         averageTransaction: number;
@@ -59,6 +60,7 @@ export declare class ReportsService {
     }>;
     getExpensesProfitReport(shopId: string, startDate?: string, endDate?: string): Promise<{
         totalRevenue: any;
+        salesProfit: number;
         totalExpenses: any;
         netProfit: number;
         expenseVsRevenueRatio: number;
@@ -71,6 +73,7 @@ export declare class ReportsService {
         dailyNetProfit: {
             date: string;
             revenue: number;
+            salesProfit: number;
             expenses: number;
             profit: number;
         }[];
@@ -79,6 +82,7 @@ export declare class ReportsService {
             year: number;
             monthLabel: string;
             revenue: number;
+            salesProfit: number;
             expenses: number;
             profit: number;
         }[];
@@ -95,6 +99,7 @@ export declare class ReportsService {
             year: number;
             monthLabel: string;
             revenue: number;
+            salesProfit: number;
             expenses: number;
             profit: number;
         }[] | undefined;
@@ -116,6 +121,7 @@ export declare class ReportsService {
         dailyNetProfit: {
             date: string;
             revenue: number;
+            salesProfit: number;
             expenses: number;
             profit: number;
         }[];

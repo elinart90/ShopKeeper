@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.InventoryController = void 0;
 const inventory_service_1 = require("./inventory.service");
 const errorHandler_1 = require("../../middleware/errorHandler");
+const params_1 = require("../../utils/params");
 const inventoryService = new inventory_service_1.InventoryService();
 class InventoryController {
     async createProduct(req, res, next) {
@@ -31,7 +32,7 @@ class InventoryController {
     }
     async getProduct(req, res, next) {
         try {
-            const { id } = req.params;
+            const id = (0, params_1.getParam)(req, 'id');
             const product = await inventoryService.getProductById(id);
             res.json({ success: true, data: product });
         }
@@ -44,7 +45,7 @@ class InventoryController {
             if (!req.shopId) {
                 throw new errorHandler_1.AppError('Shop ID is required', 400);
             }
-            const { barcode } = req.params;
+            const barcode = (0, params_1.getParam)(req, 'barcode');
             const product = await inventoryService.getProductByBarcode(req.shopId, barcode);
             if (!product) {
                 return res.status(404).json({ success: false, message: 'Product not found' });
@@ -72,7 +73,7 @@ class InventoryController {
         try {
             if (!req.shopId || !req.userId)
                 throw new errorHandler_1.AppError('Shop ID and User ID required', 400);
-            const { id } = req.params;
+            const id = (0, params_1.getParam)(req, 'id');
             const { quantity, note } = req.body || {};
             const qty = Number(quantity);
             if (!Number.isFinite(qty) || qty <= 0)
@@ -89,7 +90,7 @@ class InventoryController {
             if (!req.shopId || !req.userId) {
                 throw new errorHandler_1.AppError('Shop ID and User ID are required', 400);
             }
-            const { id } = req.params;
+            const id = (0, params_1.getParam)(req, 'id');
             const product = await inventoryService.updateProduct(id, req.shopId, req.userId, req.body);
             res.json({ success: true, data: product });
         }
@@ -102,7 +103,7 @@ class InventoryController {
             if (!req.shopId) {
                 throw new errorHandler_1.AppError('Shop ID is required', 400);
             }
-            const { id } = req.params;
+            const id = (0, params_1.getParam)(req, 'id');
             await inventoryService.deleteProduct(id, req.shopId);
             res.json({ success: true, message: 'Product deleted' });
         }
@@ -124,7 +125,7 @@ class InventoryController {
     }
     async getStockHistory(req, res, next) {
         try {
-            const { id } = req.params;
+            const id = (0, params_1.getParam)(req, 'id');
             const limit = parseInt(req.query.limit) || 50;
             const history = await inventoryService.getStockHistory(id, limit);
             res.json({ success: true, data: history });

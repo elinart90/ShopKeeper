@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.DailyCloseController = void 0;
 const daily_close_service_1 = require("./daily-close.service");
 const errorHandler_1 = require("../../middleware/errorHandler");
+const params_1 = require("../../utils/params");
 const dailyCloseService = new daily_close_service_1.DailyCloseService();
 class DailyCloseController {
     async create(req, res, next) {
@@ -20,7 +21,7 @@ class DailyCloseController {
         try {
             if (!req.shopId || !req.userId)
                 throw new errorHandler_1.AppError('Shop ID and User ID required', 400);
-            const { id } = req.params;
+            const id = (0, params_1.getParam)(req, 'id');
             const data = await dailyCloseService.approve(req.shopId, req.userId, id);
             res.json({ success: true, data });
         }
@@ -32,7 +33,7 @@ class DailyCloseController {
         try {
             if (!req.shopId || !req.userId)
                 throw new errorHandler_1.AppError('Shop ID and User ID required', 400);
-            const { id } = req.params;
+            const id = (0, params_1.getParam)(req, 'id');
             const data = await dailyCloseService.reject(req.shopId, req.userId, id);
             res.json({ success: true, data });
         }

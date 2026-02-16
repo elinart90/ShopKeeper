@@ -10,9 +10,9 @@ const requireActiveSubscription_1 = require("../../middleware/requireActiveSubsc
 const router = (0, express_1.Router)();
 const controller = new shops_controller_1.ShopsController();
 router.use(requireAuth_1.requireAuth);
+router.get('/my-shops', (req, res, next) => controller.getUserShops(req, res, next));
 router.use(requireActiveSubscription_1.requireActiveSubscription);
 router.post('/', (req, res, next) => controller.createShop(req, res, next));
-router.get('/my-shops', (req, res, next) => controller.getUserShops(req, res, next));
 router.post('/members', requireShop_1.requireShop, requireOwner_1.requireOwner, (req, res, next) => controller.addMember(req, res, next));
 router.get('/members', requireShop_1.requireShop, requireOwner_1.requireOwner, (req, res, next) => controller.getShopMembers(req, res, next));
 router.delete('/members/:userId', requireShop_1.requireShop, requireOwner_1.requireOwner, (req, res, next) => controller.removeMember(req, res, next));

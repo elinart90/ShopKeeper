@@ -6,5 +6,6 @@ export declare class MembersController {
     getCustomer(req: Request, res: Response, next: NextFunction): Promise<void>;
     updateCustomer(req: ShopRequest, res: Response, next: NextFunction): Promise<void>;
     getCreditSummary(req: ShopRequest, res: Response, next: NextFunction): Promise<void>;
+    recordPayment(req: ShopRequest, res: Response, next: NextFunction): Promise<void>;
 }
 //# sourceMappingURL=members.controller.d.ts.map

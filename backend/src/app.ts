@@ -22,7 +22,7 @@ const app = express();
 
 // Middleware - allow frontend dev server, configured URL, and LAN IPs (for phone testing)
 app.use(cors({
-  origin: (origin, cb) => {
+  origin: (origin: string | undefined, cb: (err: Error | null, allow?: boolean) => void) => {
     const allowed = [env.frontendUrl, 'http://localhost:5173', 'http://127.0.0.1:5173'];
     if (!origin) return cb(null, true);
     if (allowed.includes(origin)) return cb(null, true);

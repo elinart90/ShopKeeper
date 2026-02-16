@@ -2,6 +2,7 @@ import { Response, NextFunction } from 'express';
 import { DailyCloseService } from './daily-close.service';
 import { ShopRequest } from '../../middleware/requireShop';
 import { errorHandler, AppError } from '../../middleware/errorHandler';
+import { getParam } from '../../utils/params';
 
 const dailyCloseService = new DailyCloseService();
 
@@ -19,7 +20,7 @@ export class DailyCloseController {
   async approve(req: ShopRequest, res: Response, next: NextFunction) {
     try {
       if (!req.shopId || !req.userId) throw new AppError('Shop ID and User ID required', 400);
-      const { id } = req.params;
+      const id = getParam(req, 'id');
       const data = await dailyCloseService.approve(req.shopId, req.userId, id);
       res.json({ success: true, data });
     } catch (error) {
@@ -30,7 +31,7 @@ export class DailyCloseController {
   async reject(req: ShopRequest, res: Response, next: NextFunction) {
     try {
       if (!req.shopId || !req.userId) throw new AppError('Shop ID and User ID required', 400);
-      const { id } = req.params;
+      const id = getParam(req, 'id');
       const data = await dailyCloseService.reject(req.shopId, req.userId, id);
       res.json({ success: true, data });
     } catch (error) {
