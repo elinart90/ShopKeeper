@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { paymentsApi, salesApi } from '../../../lib/api';
+import { paymentsApi, salesApi, customersApi } from '../../../lib/api';
 import { CheckCircle, XCircle, Loader2 } from 'lucide-react';
 
 const PENDING_PAYSTACK_SALE_KEY = 'shoopkeeper_pending_paystack_sale';
+const PENDING_PAYSTACK_CREDIT_REPAYMENT_KEY = 'shoopkeeper_pending_paystack_credit_repayment';
 
 export default function PaymentCallbackPage() {
   const [searchParams] = useSearchParams();
@@ -13,6 +14,7 @@ export default function PaymentCallbackPage() {
   const [status, setStatus] = useState<'loading' | 'success' | 'failed'>('loading');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [saleId, setSaleId] = useState<string | null>(null);
+  const [repaymentRecorded, setRepaymentRecorded] = useState(false);
 
   useEffect(() => {
     if (!reference) {
@@ -30,6 +32,7 @@ export default function PaymentCallbackPage() {
         if (res.data?.success && res.data?.data?.payment) {
           setStatus('success');
           const pendingJson = sessionStorage.getItem(PENDING_PAYSTACK_SALE_KEY);
+          const pendingRepaymentJson = sessionStorage.getItem(PENDING_PAYSTACK_CREDIT_REPAYMENT_KEY);
           if (pendingJson) {
             try {
               const pending = JSON.parse(pendingJson) as {
@@ -53,6 +56,32 @@ export default function PaymentCallbackPage() {
                 });
             } catch {
               sessionStorage.removeItem(PENDING_PAYSTACK_SALE_KEY);
+            }
+          } else if (pendingRepaymentJson) {
+            try {
+              const pending = JSON.parse(pendingRepaymentJson) as {
+                customerId: string;
+                amount: number;
+                payment_method: 'cash' | 'mobile_money' | 'bank_transfer' | 'card';
+                notes?: string;
+              };
+              customersApi
+                .recordPayment(pending.customerId, {
+                  amount: Number(pending.amount),
+                  payment_method: pending.payment_method,
+                  notes: pending.notes,
+                })
+                .then(() => {
+                  if (cancelled) return;
+                  sessionStorage.removeItem(PENDING_PAYSTACK_CREDIT_REPAYMENT_KEY);
+                  setRepaymentRecorded(true);
+                })
+                .catch(() => {
+                  if (cancelled) return;
+                  setErrorMessage('Payment verified but credit repayment could not be recorded. Contact support.');
+                });
+            } catch {
+              sessionStorage.removeItem(PENDING_PAYSTACK_CREDIT_REPAYMENT_KEY);
             }
           }
         } else {
@@ -97,11 +126,13 @@ export default function PaymentCallbackPage() {
               <CheckCircle className="h-12 w-12 text-emerald-500" />
             </div>
             <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">
-              {saleId ? 'Sale completed' : 'Payment successful'}
+              {saleId ? 'Sale completed' : repaymentRecorded ? 'Credit repayment recorded' : 'Payment successful'}
             </h2>
             <p className="text-gray-600 dark:text-gray-400 mb-6">
               {saleId
                 ? 'Your payment was confirmed and the sale has been recorded.'
+                : repaymentRecorded
+                  ? 'Your payment was confirmed and customer credit balance has been updated.'
                 : errorMessage
                   ? errorMessage
                   : 'Your payment has been confirmed. You can return to the dashboard.'}

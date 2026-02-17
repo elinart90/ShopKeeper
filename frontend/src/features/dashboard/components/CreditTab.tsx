@@ -1,9 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { useShop } from "../../../contexts/useShop";
-import { customersApi } from "../../../lib/api";
+import { customersApi, paymentsApi } from "../../../lib/api";
+import { useAuth } from "../../../contexts/useAuth";
 import toast from "react-hot-toast";
 
+const PENDING_PAYSTACK_CREDIT_REPAYMENT_KEY = "shoopkeeper_pending_paystack_credit_repayment";
+
 export default function CreditTab({ onNavigate }: { onNavigate: (path: string) => void }) {
+  const { user } = useAuth();
   const { currentShop } = useShop();
   const currency = currentShop?.currency || "GHS";
   const [data, setData] = useState<{
@@ -58,6 +62,50 @@ export default function CreditTab({ onNavigate }: { onNavigate: (path: string) =
 
     setSubmittingPayment(true);
     try {
+      if (paymentMethod === "mobile_money" || paymentMethod === "card" || paymentMethod === "bank_transfer") {
+        if (!navigator.onLine) {
+          toast.error("Internet connection is required for Paystack checkout.");
+          return;
+        }
+        if (!user?.email) {
+          toast.error("Add your email in Settings to use Paystack.");
+          return;
+        }
+        const amountMinor = Math.round(amount * 100);
+        if (amountMinor < 100) {
+          toast.error("Minimum payment amount is 1.00");
+          return;
+        }
+        sessionStorage.setItem(
+          PENDING_PAYSTACK_CREDIT_REPAYMENT_KEY,
+          JSON.stringify({
+            customerId,
+            amount,
+            payment_method: paymentMethod,
+            notes: paymentNote.trim() || undefined,
+          })
+        );
+        const res = await paymentsApi.initializePaystack({
+          amount: amountMinor,
+          email: user.email,
+          purpose: "order",
+          metadata: {
+            source: "credit_repayment",
+            customer_id: customerId,
+            payment_method: paymentMethod,
+          },
+        });
+        const url = res.data?.data?.authorization_url;
+        if (url) {
+          toast.success("Redirecting to Paystack...");
+          window.location.href = url;
+          return;
+        }
+        sessionStorage.removeItem(PENDING_PAYSTACK_CREDIT_REPAYMENT_KEY);
+        toast.error("Could not start Paystack checkout");
+        return;
+      }
+
       await customersApi.recordPayment(customerId, {
         amount,
         payment_method: paymentMethod,
@@ -68,6 +116,7 @@ export default function CreditTab({ onNavigate }: { onNavigate: (path: string) =
       setPaymentNote("");
       await loadCreditSummary();
     } catch (error: any) {
+      sessionStorage.removeItem(PENDING_PAYSTACK_CREDIT_REPAYMENT_KEY);
       const msg =
         error?.response?.data?.error?.message ||
         error?.response?.data?.message ||

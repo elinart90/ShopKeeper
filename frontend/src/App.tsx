@@ -1,9 +1,11 @@
 import { Toaster } from 'react-hot-toast';
 import AppRoutes from "./app/routes/AppRoutes";
+import SyncBootstrap from "./offline/syncBootstrap";
 
 export default function App() {
   return (
     <>
+      <SyncBootstrap />
       <AppRoutes />
       <Toaster 
         position="top-right"

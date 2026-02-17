@@ -64,7 +64,7 @@ export class PaymentsService {
     const callbackUrl = `${env.frontendUrl}/payments/callback`;
     // Channels: card + mobile_money (MTN MoMo, Vodafone Cash, AirtelTigo/Telecel etc).
     // Customer chooses on Paystack page; MoMo triggers PIN prompt on their phone.
-    const channels = ['card', 'mobile_money'];
+    const channels = ['card', 'mobile_money', 'bank_transfer'];
     const res = await fetch(`${PAYSTACK_BASE}/transaction/initialize`, {
       method: 'POST',
       headers: {

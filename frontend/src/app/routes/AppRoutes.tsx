@@ -19,6 +19,7 @@ import PaymentCallbackPage from "../../features/payments/pages/PaymentCallbackPa
 import SubscriptionPage from "../../features/subscriptions/pages/SubscriptionPage";
 import SubscriptionCallbackPage from "../../features/subscriptions/pages/SubscriptionCallbackPage";
 import NotFoundPage from "../../features/error/pages/NotFoundPage";
+import SyncCenterPage from "../../features/sync/pages/SyncCenterPage";
 import { useAuth } from "../../contexts/useAuth";
 import { subscriptionsApi } from "../../lib/api";
 import type { ReactElement } from "react";
@@ -218,6 +219,14 @@ export default function AppRoutes() {
           element={
             <RequireAppAccess>
               <PaymentCallbackPage />
+            </RequireAppAccess>
+          }
+        />
+        <Route
+          path="/sync-center"
+          element={
+            <RequireAppAccess>
+              <SyncCenterPage />
             </RequireAppAccess>
           }
         />

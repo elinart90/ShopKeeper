@@ -18,6 +18,9 @@ import toast from 'react-hot-toast';
 import { inventoryApi, salesApi, paymentsApi, customersApi } from '../../../lib/api';
 import { useShop } from '../../../contexts/useShop';
 import { useAuth } from '../../../contexts/useAuth';
+import { enqueueOperation } from '../../../offline/offlineQueue';
+import { useOfflineStatus } from '../../../hooks/useOfflineStatus';
+import { useSyncQueueCount } from '../../../hooks/useSyncQueueCount';
 
 const PENDING_PAYSTACK_SALE_KEY = 'shoopkeeper_pending_paystack_sale';
 
@@ -39,6 +42,8 @@ export default function NewSale() {
   const { user } = useAuth();
   const { currentShop } = useShop();
   const navigate = useNavigate();
+  const { online } = useOfflineStatus();
+  const queue = useSyncQueueCount();
   const [cart, setCart] = useState<CartItem[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [products, setProducts] = useState<any[]>([]);
@@ -233,6 +238,10 @@ export default function NewSale() {
 
     // Mobile Money / Card: Paystack takes over (customer number + PIN prompt on phone)
     if (paymentMethod === 'mobile_money' || paymentMethod === 'card') {
+      if (!online) {
+        toast.error('Mobile money/card payments need internet connection.');
+        return;
+      }
       if (!user?.email) {
         toast.error('Add your email in Settings so we can use Paystack for this payment.');
         return;
@@ -272,11 +281,33 @@ export default function NewSale() {
 
     setProcessing(true);
     try {
-        const response = await salesApi.create(saleData as any);
+      const response = await salesApi.create(saleData as any);
       const sale = response.data.data;
       toast.success('Sale completed successfully!');
       navigate(`/sales/${sale.id}`);
     } catch (error: any) {
+      const isNetworkFailure = !!error?.networkError || !error?.response;
+      if (isNetworkFailure && currentShop?.id) {
+        await enqueueOperation({
+          entity: 'sale',
+          action: 'create',
+          method: 'post',
+          url: '/sales',
+          payload: saleData,
+          shopId: currentShop.id,
+          dedupeKey: `sale:create:${Date.now()}`,
+        });
+        toast.success('Sale saved offline. It will sync automatically when online.');
+        setCart([]);
+        setDiscount(0);
+        setSearchQuery('');
+        setProducts([]);
+        setCreditCustomerId(null);
+        setCreditCustomerDisplay('');
+        setCustomerSearch('');
+        setCustomerSearchResults([]);
+        return;
+      }
       const message = error.response?.data?.error?.message || 'Failed to complete sale';
       toast.error(message);
       console.error(error);
@@ -300,6 +331,16 @@ export default function NewSale() {
               <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
                 {currentShop?.name || 'Select a shop'}
               </p>
+              {!online && (
+                <p className="text-xs mt-1 font-medium text-red-600 dark:text-red-400">
+                  Offline mode: sales will be queued for sync
+                </p>
+              )}
+              {queue.total > 0 && (
+                <p className="text-xs mt-1 font-medium text-amber-600 dark:text-amber-400">
+                  {queue.total} pending sync
+                </p>
+              )}
             </div>
             <button
               onClick={() => navigate('/dashboard')}

@@ -4,6 +4,8 @@ import { Plus, Search, Package, AlertTriangle, Edit, Trash2 } from 'lucide-react
 import toast from 'react-hot-toast';
 import { inventoryApi } from '../../../lib/api';
 import { useShop } from '../../../contexts/useShop';
+import { cacheProducts, getCachedProducts } from '../../../offline/inventoryCache';
+import { useOfflineStatus } from '../../../hooks/useOfflineStatus';
 
 interface Product {
   id: string;
@@ -21,10 +23,12 @@ interface Product {
 export default function InventoryList() {
   const { currentShop } = useShop();
   const navigate = useNavigate();
+  const { online } = useOfflineStatus();
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<'all' | 'low_stock' | 'out_of_stock'>('all');
+  const [usingCache, setUsingCache] = useState(false);
 
   useEffect(() => {
     if (currentShop) {
@@ -53,9 +57,26 @@ export default function InventoryList() {
       }
 
       setProducts(productsData);
+      setUsingCache(false);
+      await cacheProducts(currentShop.id, productsData);
     } catch (error: any) {
-      toast.error('Failed to load products');
-      console.error(error);
+      const cached = await getCachedProducts(currentShop.id, {
+        search: searchQuery,
+        lowStock: filter === 'low_stock',
+        outOfStock: filter === 'out_of_stock',
+      });
+      if (cached.length > 0 || !online) {
+        setProducts(cached as Product[]);
+        setUsingCache(true);
+        if (!online) {
+          toast('Offline: showing cached inventory');
+        } else {
+          toast('Using cached inventory (sync pending)');
+        }
+      } else {
+        toast.error('Failed to load products');
+        console.error(error);
+      }
     } finally {
       setLoading(false);
     }
@@ -109,6 +130,11 @@ export default function InventoryList() {
               <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
                 Manage your products and stock levels
               </p>
+              {usingCache && (
+                <p className="text-xs font-medium text-amber-600 dark:text-amber-400 mt-1">
+                  Offline cache mode
+                </p>
+              )}
             </div>
             <button
               onClick={() => navigate('/inventory/add')}
