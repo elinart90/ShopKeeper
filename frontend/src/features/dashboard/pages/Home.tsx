@@ -1,4 +1,4 @@
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate, Link, useSearchParams } from "react-router-dom";
 import { useEffect, useState, useRef } from "react";
 import {
   ShoppingCart,
@@ -139,6 +139,7 @@ export default function Home() {
   const [stats, setStats] = useState<any>(null);
   const [intelligence, setIntelligence] = useState<any>(null);
   const [loadingStats, setLoadingStats] = useState(true);
+  const [searchParams] = useSearchParams();
   const [dateRange, setDateRange] = useState<{ start: string; end: string }>(() => {
     const d = new Date();
     const start = new Date(d);
@@ -162,6 +163,16 @@ export default function Home() {
       setActiveTab("overview");
     }
   }, [currentShop?.role, activeTab]);
+
+  useEffect(() => {
+    const tabParam = searchParams.get("tab");
+    if (!tabParam) return;
+    const requested = tabParam as TabId;
+    const visibleIds = getVisibleTabs(currentShop?.role).map((t) => t.id);
+    if (visibleIds.includes(requested)) {
+      setActiveTab(requested);
+    }
+  }, [searchParams, currentShop?.role]);
 
   const loadStats = async () => {
     if (!currentShop) return;
@@ -310,11 +321,75 @@ export default function Home() {
   }
 
   const currency = currentShop.currency || "USD";
+  const visibleTabs = getVisibleTabs(currentShop?.role);
+
+  const handleTabSelect = (id: TabId) => {
+    if (id === "dashboard-edit") {
+      navigate("/dashboard/edit");
+      return;
+    }
+    setActiveTab(id);
+  };
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-      {/* Top bar: date/time + range + shop switcher */}
-      <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-4 py-3 flex flex-wrap items-center justify-between gap-2">
+      {/* Mobile top bar + hamburger menu */}
+      <div className="sm:hidden bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-4 py-3 space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <div className="w-1/2 flex items-center gap-2 text-gray-700 dark:text-gray-300">
+            <Clock className="h-5 w-5 shrink-0" />
+            <div className="leading-tight">
+              <div className="font-medium text-xs">
+                {liveTime.toLocaleDateString(undefined, {
+                  weekday: "short",
+                  month: "short",
+                  day: "numeric",
+                  year: "numeric",
+                })}
+              </div>
+              <div className="font-mono text-xs">
+                {liveTime.toLocaleTimeString(undefined, {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                  second: "2-digit",
+                })}
+              </div>
+            </div>
+          </div>
+
+          <div className="w-1/2 flex justify-end">
+            <ShopSwitcher
+              currentShop={currentShop}
+              shops={shops}
+              onSelect={(s) => {
+                const full = shops.find((sh) => sh.id === s.id);
+                if (full) selectShop(full);
+              }}
+              onCreate={() => navigate("/shops/create")}
+            />
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <label className="text-sm text-gray-600 dark:text-gray-400">Range:</label>
+          <input
+            type="date"
+            value={dateRange.start}
+            onChange={(e) => setDateRange((r) => ({ ...r, start: e.target.value }))}
+            className="rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm px-2 py-1"
+          />
+          <span className="text-gray-400">to</span>
+          <input
+            type="date"
+            value={dateRange.end}
+            onChange={(e) => setDateRange((r) => ({ ...r, end: e.target.value }))}
+            className="rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm px-2 py-1"
+          />
+        </div>
+      </div>
+
+      {/* Desktop top bar: date/time + range + shop switcher */}
+      <div className="hidden sm:flex bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-4 py-3 flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-4 flex-wrap">
           <div className="flex items-center gap-2 text-gray-700 dark:text-gray-300">
             <Clock className="h-5 w-5" />
@@ -362,19 +437,13 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Tabs (Money Flow, Inventory Finance, Reports, Staff & Controls are owner-only) */}
-      <div className="border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-4">
+      {/* Desktop tabs */}
+      <div className="hidden sm:block border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-4">
         <nav className="flex gap-1 overflow-x-auto py-2">
-          {getVisibleTabs(currentShop?.role).map(({ id, label, icon: Icon }) => (
+          {visibleTabs.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
-              onClick={() => {
-                if (id === "dashboard-edit") {
-                  navigate("/dashboard/edit");
-                  return;
-                }
-                setActiveTab(id);
-              }}
+              onClick={() => handleTabSelect(id)}
               className={`flex items-center gap-2 px-4 py-2 rounded-t-lg text-sm font-medium whitespace-nowrap transition ${
                 activeTab === id
                   ? "btn-tab-gradient"

@@ -39,8 +39,16 @@ app.use('/api/webhooks/paystack', express.raw({ type: 'application/json' }), pay
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Health check
+// Root – so visiting / doesn't return "Cannot GET"
+app.get('/', (req, res) => {
+  res.json({ message: 'ShoopKeeper API', health: '/health', api: '/api/...' });
+});
+
+// Health check (Render and others often use /api/health)
 app.get('/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
