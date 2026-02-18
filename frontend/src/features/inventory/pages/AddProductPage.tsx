@@ -11,10 +11,10 @@ import {
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { BrowserMultiFormatReader, BrowserCodeReader } from '@zxing/browser';
-import type { IScannerControls } from '@zxing/browser';
+import { Html5Qrcode } from 'html5-qrcode';
 import { inventoryApi } from '../../../lib/api';
 import { useShop } from '../../../contexts/useShop';
+import { decodeBarcodeFromImageFile, PRODUCT_BARCODE_FORMATS } from '../../../lib/barcodeImageDecoder';
 
 const UNITS = [
   { value: 'piece', label: 'Pcs' },
@@ -34,12 +34,14 @@ export default function AddProductPage() {
   const { currentShop } = useShop();
   const navigate = useNavigate();
   const barcodeInputRef = useRef<HTMLInputElement>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const scannerControlsRef = useRef<IScannerControls | null>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const scannerRef = useRef<Html5Qrcode | null>(null);
+  const handlingScanRef = useRef(false);
 
   const [entryMode, setEntryMode] = useState<EntryMode>('choose');
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [cameraLoading, setCameraLoading] = useState(false);
+  const [fileScanning, setFileScanning] = useState(false);
   const [scannedBarcode, setScannedBarcode] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
@@ -111,8 +113,14 @@ export default function AddProductPage() {
   const handleBarcodeDetected = useCallback(async (barcode: string) => {
     const code = barcode.trim();
     if (!code) return;
-    scannerControlsRef.current?.stop();
-    scannerControlsRef.current = null;
+    if (scannerRef.current) {
+      const activeScanner = scannerRef.current;
+      scannerRef.current = null;
+      activeScanner.stop().catch(() => {}).finally(() => {
+        activeScanner.clear().catch(() => {});
+      });
+    }
+    handlingScanRef.current = false;
     setScannedBarcode(code);
     setForm((f) => ({ ...f, barcode: code }));
     try {
@@ -130,61 +138,138 @@ export default function AddProductPage() {
   }, [navigate]);
 
   const stopCamera = useCallback(() => {
-    scannerControlsRef.current?.stop();
-    scannerControlsRef.current = null;
-    BrowserCodeReader.releaseAllStreams();
+    if (scannerRef.current) {
+      const activeScanner = scannerRef.current;
+      scannerRef.current = null;
+      activeScanner.stop().catch(() => {}).finally(() => {
+        activeScanner.clear().catch(() => {});
+      });
+    }
+    handlingScanRef.current = false;
+    setCameraLoading(false);
+    setCameraError(null);
     setEntryMode('scan');
   }, []);
 
-  useEffect(() => {
-    if (entryMode !== 'scan-camera' || !videoRef.current) return;
+  const openImagePicker = () => {
+    imageInputRef.current?.click();
+  };
 
-    const mediaDevices = typeof navigator !== 'undefined' ? navigator.mediaDevices : undefined;
-    if (!mediaDevices?.getUserMedia) {
+  const handleImageSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+
+    if (entryMode === 'scan-camera') {
+      stopCamera();
+    }
+
+    setFileScanning(true);
+    setCameraError(null);
+    try {
+      const decodedText = await decodeBarcodeFromImageFile(file, 'add-product-file-reader');
+      await handleBarcodeDetected(decodedText);
+      toast.success('Barcode detected from image');
+    } catch (error: any) {
+      console.error('Failed to decode barcode from image:', error);
+      const msg = String(error?.message || '').toLowerCase();
+      if (msg.includes('permission') || msg.includes('security')) {
+        toast.error('Could not access image. Please allow photos/files and try again.');
+      } else {
+        toast.error('Could not read barcode from image. Crop closer to barcode and retry.');
+      }
+    } finally {
+      setFileScanning(false);
+    }
+  };
+
+  useEffect(() => {
+    if (entryMode !== 'scan-camera') return;
+
+    const secureContextOk =
+      typeof window !== 'undefined' &&
+      (window.isSecureContext ||
+        window.location.hostname === 'localhost' ||
+        window.location.hostname === '127.0.0.1');
+
+    if (!secureContextOk) {
       setCameraLoading(false);
-      setCameraError(
-        'Camera needs HTTPS. On phone: run "npm run dev:https" on your PC, then open https://YOUR_PC_IP:5173 and accept the certificate.'
-      );
+      setCameraError('Camera needs HTTPS. Open with https://YOUR_PC_IP:5173 and allow certificate.');
       return;
     }
 
+    if (!navigator?.mediaDevices?.getUserMedia) {
+      setCameraLoading(false);
+      setCameraError('Camera is not available on this browser/device.');
+      return;
+    }
+
+    let cancelled = false;
     setCameraError(null);
     setCameraLoading(true);
-    const codeReader = new BrowserMultiFormatReader();
-    codeReader
-      .decodeFromVideoDevice(undefined, videoRef.current, (result, _error, controls) => {
-        if (result) {
-          scannerControlsRef.current = controls;
-          handleBarcodeDetected(result.getText());
+
+    const startScanner = async () => {
+      try {
+        handlingScanRef.current = false;
+        const scanner = new Html5Qrcode('add-product-barcode-reader', { verbose: false });
+        scannerRef.current = scanner;
+
+        await scanner.start(
+          { facingMode: { ideal: 'environment' } },
+          {
+            fps: 12,
+            qrbox: { width: 280, height: 150 },
+            disableFlip: true,
+            formatsToSupport: PRODUCT_BARCODE_FORMATS,
+          },
+          async (decodedText) => {
+            if (handlingScanRef.current) return;
+            handlingScanRef.current = true;
+            await handleBarcodeDetected(decodedText);
+          },
+          () => {
+            // ignore per-frame decode errors
+          }
+        );
+
+        if (!cancelled) {
+          setCameraLoading(false);
         }
-      })
-      .then((controls) => {
-        scannerControlsRef.current = controls;
+      } catch (err: any) {
+        if (cancelled) return;
         setCameraLoading(false);
-      })
-      .catch((err: Error) => {
-        setCameraLoading(false);
-        const msg = (err?.message ?? '').toLowerCase();
+        const msg = String(err?.message || '').toLowerCase();
         if (msg.includes('getusermedia') || msg.includes('secure context')) {
-          setCameraError(
-            'Camera needs HTTPS. On phone: run "npm run dev:https", then open https://YOUR_PC_IP:5173 and allow the certificate.'
-          );
+          setCameraError('Camera needs HTTPS. Open with https://YOUR_PC_IP:5173 and allow certificate.');
+        } else if (msg.includes('permission') || msg.includes('notallowederror')) {
+          setCameraError('Camera permission denied. Allow camera access and try again.');
         } else if (
           msg.includes('requested device not found') ||
           msg.includes('device not found') ||
           msg.includes('no device')
         ) {
-          setCameraError(
-            'No camera found. Plug in a webcam, or check if the camera is in use by another app.'
-          );
+          setCameraError('No camera found. Plug in webcam or close other apps using camera.');
         } else {
-          setCameraError(err?.message || 'Could not access camera.');
+          setCameraError(err?.message || 'Failed to start camera.');
         }
-      });
+      }
+    };
+
+    const timer = window.setTimeout(() => {
+      void startScanner();
+    }, 0);
+
     return () => {
-      scannerControlsRef.current?.stop();
-      scannerControlsRef.current = null;
-      BrowserCodeReader.releaseAllStreams();
+      cancelled = true;
+      window.clearTimeout(timer);
+      if (scannerRef.current) {
+        const activeScanner = scannerRef.current;
+        scannerRef.current = null;
+        activeScanner.stop().catch(() => {}).finally(() => {
+          activeScanner.clear().catch(() => {});
+        });
+      }
+      handlingScanRef.current = false;
     };
   }, [entryMode, handleBarcodeDetected]);
 
@@ -393,16 +478,11 @@ export default function AddProductPage() {
             Point your camera at a barcode. It will be detected automatically.
           </p>
           <div className="relative aspect-[4/3] max-h-[50vh] rounded-xl overflow-hidden bg-black border border-gray-300 dark:border-gray-600">
-            <video
-              ref={videoRef}
-              className="w-full h-full object-cover"
-              muted
-              playsInline
-            />
+            <div id="add-product-barcode-reader" className="w-full h-full"></div>
             {cameraLoading && (
               <div className="absolute inset-0 flex items-center justify-center bg-black/60">
                 <div className="h-10 w-10 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                <span className="ml-2 text-white">Starting camera…</span>
+                <span className="ml-2 text-white">Starting camera...</span>
               </div>
             )}
             {cameraError && (
@@ -465,6 +545,22 @@ export default function AddProductPage() {
           >
             <Camera className="h-5 w-5" /> Use camera instead
           </button>
+          <button
+            type="button"
+            onClick={openImagePicker}
+            disabled={fileScanning}
+            className="mt-3 w-full py-3 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-60"
+          >
+            {fileScanning ? 'Reading image...' : 'Scan from gallery'}
+          </button>
+          <input
+            ref={imageInputRef}
+            type="file"
+            accept="image/*"
+            onChange={handleImageSelected}
+            className="hidden"
+          />
+          <div id="add-product-file-reader" className="hidden"></div>
           <button
             onClick={() => setEntryMode('choose')}
             className="mt-2 w-full py-2 text-gray-500"

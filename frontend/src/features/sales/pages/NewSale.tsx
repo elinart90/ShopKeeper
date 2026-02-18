@@ -21,6 +21,7 @@ import { useAuth } from '../../../contexts/useAuth';
 import { enqueueOperation } from '../../../offline/offlineQueue';
 import { useOfflineStatus } from '../../../hooks/useOfflineStatus';
 import { useSyncQueueCount } from '../../../hooks/useSyncQueueCount';
+import { decodeBarcodeFromImageFile, PRODUCT_BARCODE_FORMATS } from '../../../lib/barcodeImageDecoder';
 
 const PENDING_PAYSTACK_SALE_KEY = 'shoopkeeper_pending_paystack_sale';
 
@@ -49,11 +50,17 @@ export default function NewSale() {
   const [products, setProducts] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [scanning, setScanning] = useState(false);
+  const [scannerStarting, setScannerStarting] = useState(false);
+  const [scannerError, setScannerError] = useState<string | null>(null);
+  const [fileScanning, setFileScanning] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash');
   const [discount, setDiscount] = useState(0);
   const [processing, setProcessing] = useState(false);
   const scannerRef = useRef<Html5Qrcode | null>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const handlingScanRef = useRef(false);
   const qrCodeRegionId = 'qr-reader';
+  const qrCodeFileRegionId = 'qr-reader-file';
 
   // Credit: customer selection
   const [creditCustomerId, setCreditCustomerId] = useState<string | null>(null);
@@ -109,40 +116,144 @@ export default function NewSale() {
       stopScanning();
       return;
     }
-
+    setScannerError(null);
     setScanning(true);
-    try {
-      scannerRef.current = new Html5Qrcode(qrCodeRegionId);
-      
-      await scannerRef.current.start(
-        { facingMode: 'environment' },
-        {
-          fps: 10,
-          qrbox: { width: 250, height: 250 },
-        },
-        async (decodedText) => {
-          await handleBarcodeScanned(decodedText);
-          stopScanning();
-        },
-        (_errorMessage) => {
-          // Ignore scanning errors
-        }
-      );
-    } catch (error) {
-      console.error('Failed to start scanner:', error);
-      toast.error('Failed to start camera');
-      setScanning(false);
-    }
   };
 
   const stopScanning = () => {
     if (scannerRef.current) {
-      scannerRef.current.stop().catch(() => {});
-      scannerRef.current.clear();
+      const activeScanner = scannerRef.current;
       scannerRef.current = null;
+      activeScanner.stop().catch(() => {}).finally(() => {
+        activeScanner.clear().catch(() => {});
+      });
     }
+    handlingScanRef.current = false;
+    setScannerStarting(false);
+    setScannerError(null);
     setScanning(false);
   };
+
+  const openImagePicker = () => {
+    imageInputRef.current?.click();
+  };
+
+  const handleImageSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+
+    if (scanning) stopScanning();
+
+    setFileScanning(true);
+    setScannerError(null);
+    try {
+      const decodedText = await decodeBarcodeFromImageFile(file, qrCodeFileRegionId);
+      await handleBarcodeScanned(decodedText);
+      toast.success('Barcode detected from image');
+    } catch (error: any) {
+      console.error('Failed to decode barcode from image:', error);
+      const msg = String(error?.message || '').toLowerCase();
+      if (msg.includes('permission') || msg.includes('security')) {
+        toast.error('Could not access image. Please allow photos/files and try again.');
+      } else {
+        toast.error('Could not read barcode from image. Crop closer to barcode and retry.');
+      }
+    } finally {
+      setFileScanning(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!scanning) return;
+
+    const secureContextOk =
+      typeof window !== 'undefined' &&
+      (window.isSecureContext ||
+        window.location.hostname === 'localhost' ||
+        window.location.hostname === '127.0.0.1');
+
+    if (!secureContextOk) {
+      setScannerError(
+        'Camera needs HTTPS. Open the app with https://YOUR_PC_IP:5173 and allow the certificate.'
+      );
+      setScanning(false);
+      return;
+    }
+
+    if (!navigator?.mediaDevices?.getUserMedia) {
+      setScannerError('Camera is not available on this browser/device.');
+      setScanning(false);
+      return;
+    }
+
+    let cancelled = false;
+    const startScanner = async () => {
+      try {
+        setScannerStarting(true);
+        setScannerError(null);
+        handlingScanRef.current = false;
+
+        const scanner = new Html5Qrcode(qrCodeRegionId, { verbose: false });
+        scannerRef.current = scanner;
+
+        await scanner.start(
+          { facingMode: { ideal: 'environment' } },
+          {
+            fps: 12,
+            qrbox: { width: 280, height: 150 },
+            disableFlip: true,
+            formatsToSupport: PRODUCT_BARCODE_FORMATS,
+          },
+          async (decodedText) => {
+            if (handlingScanRef.current) return;
+            handlingScanRef.current = true;
+            await handleBarcodeScanned(decodedText);
+            stopScanning();
+          },
+          () => {
+            // ignore per-frame decode errors
+          }
+        );
+
+        if (!cancelled) setScannerStarting(false);
+      } catch (error: any) {
+        console.error('Failed to start scanner:', error);
+        if (cancelled) return;
+        setScannerStarting(false);
+
+        const msg = String(error?.message || '').toLowerCase();
+        if (msg.includes('permission') || msg.includes('notallowederror')) {
+          setScannerError('Camera permission denied. Allow camera access and try again.');
+        } else if (msg.includes('secure') || msg.includes('https')) {
+          setScannerError('Camera needs HTTPS. Open with https://YOUR_PC_IP:5173.');
+        } else if (msg.includes('notfound') || msg.includes('device')) {
+          setScannerError('No camera found on this device.');
+        } else {
+          setScannerError(error?.message || 'Failed to start camera');
+        }
+        setScanning(false);
+      }
+    };
+
+    const timer = window.setTimeout(() => {
+      void startScanner();
+    }, 0);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+      if (scannerRef.current) {
+        const activeScanner = scannerRef.current;
+        scannerRef.current = null;
+        activeScanner.stop().catch(() => {}).finally(() => {
+          activeScanner.clear().catch(() => {});
+        });
+      }
+      handlingScanRef.current = false;
+      setScannerStarting(false);
+    };
+  }, [scanning]);
 
   const handleBarcodeScanned = async (barcode: string) => {
     try {
@@ -371,6 +482,7 @@ export default function NewSale() {
                 </div>
                 <button
                   onClick={scanBarcode}
+                  disabled={fileScanning}
                   className={`px-4 py-2 rounded-lg font-medium transition ${
                     scanning
                       ? 'bg-red-500 text-white hover:bg-red-600'
@@ -379,12 +491,34 @@ export default function NewSale() {
                 >
                   <Scan className="h-5 w-5" />
                 </button>
+                <button
+                  type="button"
+                  onClick={openImagePicker}
+                  disabled={fileScanning}
+                  className="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-60"
+                >
+                  {fileScanning ? 'Reading image...' : 'Scan from gallery'}
+                </button>
               </div>
+              <input
+                ref={imageInputRef}
+                type="file"
+                accept="image/*"
+                onChange={handleImageSelected}
+                className="hidden"
+              />
+              <div id={qrCodeFileRegionId} className="hidden"></div>
 
               {/* QR Scanner */}
               {scanning && (
                 <div className="mt-4">
                   <div id={qrCodeRegionId} className="w-full"></div>
+                  {scannerStarting && (
+                    <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">Starting camera...</p>
+                  )}
+                  {scannerError && (
+                    <p className="mt-2 text-sm text-red-600 dark:text-red-400">{scannerError}</p>
+                  )}
                   <button
                     onClick={stopScanning}
                     className="mt-2 w-full px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600"
