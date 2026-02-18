@@ -175,7 +175,11 @@ export async function decodeBarcodeFromImageFile(file: File, elementId: string):
       }
     }
   } finally {
-    await scanner.clear().catch(() => {});
+    try {
+      scanner.clear();
+    } catch {
+      // ignore cleanup errors
+    }
   }
 
   throw lastError || new Error('Could not read barcode from image.');

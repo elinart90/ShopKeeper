@@ -21,7 +21,7 @@ import { useAuth } from '../../../contexts/useAuth';
 import { enqueueOperation } from '../../../offline/offlineQueue';
 import { useOfflineStatus } from '../../../hooks/useOfflineStatus';
 import { useSyncQueueCount } from '../../../hooks/useSyncQueueCount';
-import { decodeBarcodeFromImageFile, PRODUCT_BARCODE_FORMATS } from '../../../lib/barcodeImageDecoder';
+import { decodeBarcodeFromImageFile } from '../../../lib/barcodeImageDecoder';
 
 const PENDING_PAYSTACK_SALE_KEY = 'shoopkeeper_pending_paystack_sale';
 
@@ -125,7 +125,11 @@ export default function NewSale() {
       const activeScanner = scannerRef.current;
       scannerRef.current = null;
       activeScanner.stop().catch(() => {}).finally(() => {
-        activeScanner.clear().catch(() => {});
+        try {
+          activeScanner.clear();
+        } catch {
+          // ignore cleanup errors
+        }
       });
     }
     handlingScanRef.current = false;
@@ -203,7 +207,6 @@ export default function NewSale() {
             fps: 12,
             qrbox: { width: 280, height: 150 },
             disableFlip: true,
-            formatsToSupport: PRODUCT_BARCODE_FORMATS,
           },
           async (decodedText) => {
             if (handlingScanRef.current) return;
@@ -247,7 +250,11 @@ export default function NewSale() {
         const activeScanner = scannerRef.current;
         scannerRef.current = null;
         activeScanner.stop().catch(() => {}).finally(() => {
-          activeScanner.clear().catch(() => {});
+          try {
+            activeScanner.clear();
+          } catch {
+            // ignore cleanup errors
+          }
         });
       }
       handlingScanRef.current = false;

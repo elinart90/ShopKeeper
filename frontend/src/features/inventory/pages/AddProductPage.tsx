@@ -14,7 +14,7 @@ import toast from 'react-hot-toast';
 import { Html5Qrcode } from 'html5-qrcode';
 import { inventoryApi } from '../../../lib/api';
 import { useShop } from '../../../contexts/useShop';
-import { decodeBarcodeFromImageFile, PRODUCT_BARCODE_FORMATS } from '../../../lib/barcodeImageDecoder';
+import { decodeBarcodeFromImageFile } from '../../../lib/barcodeImageDecoder';
 
 const UNITS = [
   { value: 'piece', label: 'Pcs' },
@@ -117,7 +117,11 @@ export default function AddProductPage() {
       const activeScanner = scannerRef.current;
       scannerRef.current = null;
       activeScanner.stop().catch(() => {}).finally(() => {
-        activeScanner.clear().catch(() => {});
+        try {
+          activeScanner.clear();
+        } catch {
+          // ignore cleanup errors
+        }
       });
     }
     handlingScanRef.current = false;
@@ -142,7 +146,11 @@ export default function AddProductPage() {
       const activeScanner = scannerRef.current;
       scannerRef.current = null;
       activeScanner.stop().catch(() => {}).finally(() => {
-        activeScanner.clear().catch(() => {});
+        try {
+          activeScanner.clear();
+        } catch {
+          // ignore cleanup errors
+        }
       });
     }
     handlingScanRef.current = false;
@@ -220,7 +228,6 @@ export default function AddProductPage() {
             fps: 12,
             qrbox: { width: 280, height: 150 },
             disableFlip: true,
-            formatsToSupport: PRODUCT_BARCODE_FORMATS,
           },
           async (decodedText) => {
             if (handlingScanRef.current) return;
@@ -266,7 +273,11 @@ export default function AddProductPage() {
         const activeScanner = scannerRef.current;
         scannerRef.current = null;
         activeScanner.stop().catch(() => {}).finally(() => {
-          activeScanner.clear().catch(() => {});
+          try {
+            activeScanner.clear();
+          } catch {
+            // ignore cleanup errors
+          }
         });
       }
       handlingScanRef.current = false;
