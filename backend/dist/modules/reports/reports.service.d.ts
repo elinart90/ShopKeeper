@@ -6,11 +6,35 @@ export declare class ReportsService {
         salesProfit: number;
         totalTransactions: number;
         lowStockCount: number;
+        lowStockItems: {
+            productId: any;
+            name: any;
+            stockQuantity: number;
+            minStockLevel: number;
+        }[];
         averageTransaction: number;
         paymentMethodBreakdown: Record<string, number>;
         activeStaffToday: number;
     }>;
     getSalesIntelligence(shopId: string, startDate?: string, endDate?: string): Promise<{
+        topProducts: never[];
+        slowMovingProducts: never[];
+        paymentMethodBreakdown: Record<string, {
+            amount: number;
+            count: number;
+        }>;
+        peakHours: {
+            hour: number;
+            amount: number;
+        }[];
+        salesByStaff: {
+            amount: number;
+            count: number;
+            staffId: string;
+        }[];
+        dailyComparison?: undefined;
+        recentDailyMetrics?: undefined;
+    } | {
         topProducts: {
             productId: string;
             name: any;
@@ -30,6 +54,23 @@ export declare class ReportsService {
         peakHours: {
             hour: number;
             amount: number;
+        }[];
+        dailyComparison: {
+            revenueToday: number;
+            revenueYesterday: number;
+            revenueChangePercent: number;
+            expenseToday: number;
+            expenseYesterday: number;
+            expenseChangePercent: number;
+            profitToday: number;
+            profitYesterday: number;
+            profitChangePercent: number;
+        };
+        recentDailyMetrics: {
+            date: string;
+            revenue: number;
+            expenses: number;
+            profit: number;
         }[];
         salesByStaff: {
             amount: number;

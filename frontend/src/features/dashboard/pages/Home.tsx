@@ -24,9 +24,13 @@ import {
   Check,
   X,
   ShieldCheck,
+  Sun,
+  Moon,
+  Monitor,
 } from "lucide-react";
 import { useShop } from "../../../contexts/useShop";
 import { useAuth } from "../../../contexts/useAuth";
+import { useTheme } from "../../../contexts/ThemeContext";
 import { reportsApi, walletsApi, dailyCloseApi, shopsApi, salesApi, authApi, clearShopId, controlsApi } from "../../../lib/api";
 import type { ComplianceExportData } from "../../../lib/api";
 import toast from "react-hot-toast";
@@ -68,6 +72,55 @@ function formatDateRange(start: string, end: string) {
   const e = new Date(end);
   if (s.toDateString() === e.toDateString()) return s.toLocaleDateString();
   return `${s.toLocaleDateString()} - ${e.toLocaleDateString()}`;
+}
+
+function formatTrendPercent(value: number) {
+  const abs = Math.abs(Number(value || 0));
+  return `${abs.toFixed(1)}%`;
+}
+
+function MiniSparkline({
+  values,
+  className = "",
+}: {
+  values: number[];
+  className?: string;
+}) {
+  const series = (values || []).map((v) => Number(v || 0));
+  if (series.length < 2) {
+    return <div className={`h-8 rounded bg-gray-100 dark:bg-gray-700 ${className}`} />;
+  }
+  const min = Math.min(...series);
+  const max = Math.max(...series);
+  const range = max - min || 1;
+  const width = 100;
+  const height = 28;
+  const points = series
+    .map((v, i) => {
+      const x = (i / (series.length - 1)) * width;
+      const y = height - ((v - min) / range) * height;
+      return `${x.toFixed(2)},${y.toFixed(2)}`;
+    })
+    .join(" ");
+  const up = series[series.length - 1] >= series[0];
+  const strokeColor = up ? "#10b981" : "#ef4444";
+
+  return (
+    <svg
+      viewBox={`0 0 ${width} ${height}`}
+      preserveAspectRatio="none"
+      className={`w-full h-8 ${className}`}
+    >
+      <polyline
+        fill="none"
+        stroke={strokeColor}
+        strokeWidth="2"
+        strokeLinejoin="round"
+        strokeLinecap="round"
+        points={points}
+      />
+    </svg>
+  );
 }
 
 function ShopSwitcher({
@@ -517,6 +570,10 @@ function OverviewTab({
   const mobileMoney = paymentBreakdown.mobile_money ?? 0;
   const card = paymentBreakdown.card ?? 0;
   const other = (paymentBreakdown.bank_transfer ?? 0) + (paymentBreakdown.credit ?? 0);
+  const paymentTotal = Number(cash) + Number(mobileMoney) + Number(card) + Number(other);
+  const lowStockItems = stats?.lowStockItems || [];
+  const outOfStockCount = lowStockItems.filter((item: any) => Number(item.stockQuantity || 0) <= 0).length;
+  const lowOnlyCount = Math.max(Number(stats?.lowStockCount || 0) - outOfStockCount, 0);
 
   return (
     <div className="space-y-8">
@@ -572,24 +629,28 @@ function OverviewTab({
                 label="Cash"
                 value={cash}
                 currency={currency}
+                percentage={paymentTotal > 0 ? (Number(cash || 0) / paymentTotal) * 100 : 0}
               />
               <PaymentChip
                 icon={<Smartphone className="h-5 w-5" />}
                 label="Mobile Money"
                 value={mobileMoney}
                 currency={currency}
+                percentage={paymentTotal > 0 ? (Number(mobileMoney || 0) / paymentTotal) * 100 : 0}
               />
               <PaymentChip
                 icon={<CreditCard className="h-5 w-5" />}
                 label="Card"
                 value={card}
                 currency={currency}
+                percentage={paymentTotal > 0 ? (Number(card || 0) / paymentTotal) * 100 : 0}
               />
               <PaymentChip
                 icon={<Wallet className="h-5 w-5" />}
                 label="Other"
                 value={other}
                 currency={currency}
+                percentage={paymentTotal > 0 ? (Number(other || 0) / paymentTotal) * 100 : 0}
               />
             </div>
           </div>
@@ -599,6 +660,26 @@ function OverviewTab({
             <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
               Sales Intelligence
             </h2>
+            {!!intelligence?.dailyComparison && (
+              <div className="mb-4 p-4 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40">
+                <p className="text-sm text-gray-500 dark:text-gray-400">Revenue Today vs Yesterday</p>
+                <div className="mt-1 flex items-center gap-2">
+                  <p className="text-xl font-bold text-gray-900 dark:text-white">
+                    {currency} {Number(intelligence.dailyComparison.revenueToday || 0).toFixed(2)}
+                  </p>
+                  <span
+                    className={`text-sm font-semibold ${
+                      Number(intelligence.dailyComparison.revenueChangePercent || 0) >= 0
+                        ? "text-emerald-600 dark:text-emerald-400"
+                        : "text-red-600 dark:text-red-400"
+                    }`}
+                  >
+                    {Number(intelligence.dailyComparison.revenueChangePercent || 0) >= 0 ? "↑" : "↓"}{" "}
+                    {formatTrendPercent(Number(intelligence.dailyComparison.revenueChangePercent || 0))}
+                  </span>
+                </div>
+              </div>
+            )}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <div>
                 <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-2">
@@ -676,13 +757,47 @@ function OverviewTab({
           {/* Low stock + Quick actions */}
           <div className="flex flex-wrap gap-4 items-center justify-between">
             {stats?.lowStockCount > 0 && (
-              <button
-                onClick={() => onNavigate("/inventory?filter=low_stock")}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-200"
-              >
-                <AlertTriangle className="h-5 w-5" />
-                {stats.lowStockCount} low stock item(s)
-              </button>
+              <div className="w-full sm:w-auto">
+                <button
+                  onClick={() => onNavigate(outOfStockCount > 0 ? "/inventory?filter=out_of_stock" : "/inventory?filter=low_stock")}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg border ${
+                    outOfStockCount > 0
+                      ? "bg-red-100 dark:bg-red-900/30 border-red-300 dark:border-red-800 text-red-800 dark:text-red-200"
+                      : "bg-amber-100 dark:bg-amber-900/30 border-amber-300 dark:border-amber-800 text-amber-800 dark:text-amber-200"
+                  }`}
+                >
+                  <AlertTriangle className="h-5 w-5" />
+                  <span>
+                    {lowOnlyCount > 0 ? `${lowOnlyCount} low` : "0 low"}
+                    {" • "}
+                    {outOfStockCount > 0 ? `${outOfStockCount} out of stock` : "0 out of stock"}
+                  </span>
+                </button>
+                <div className="mt-2 p-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm">
+                  {lowStockItems.length > 0 ? (
+                    <div className="space-y-1">
+                      {lowStockItems.map((item: any) => {
+                        const isOut = Number(item.stockQuantity || 0) <= 0;
+                        return (
+                          <button
+                            key={item.productId}
+                            onClick={() => onNavigate(isOut ? "/inventory?filter=out_of_stock" : "/inventory?filter=low_stock")}
+                            className={`w-full text-left px-2 py-1 rounded ${
+                              isOut
+                                ? "bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200"
+                                : "bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-200"
+                            }`}
+                          >
+                            <span className="font-medium">{item.name}</span> - {isOut ? "out of stock" : `only ${Number(item.stockQuantity || 0)} left`}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="text-gray-600 dark:text-gray-300">Low stock items found. Open inventory to view details.</p>
+                  )}
+                </div>
+              </div>
             )}
             <div className="flex gap-2">
               <button
@@ -739,11 +854,13 @@ function PaymentChip({
   label,
   value,
   currency,
+  percentage,
 }: {
   icon: React.ReactNode;
   label: string;
   value: number;
   currency: string;
+  percentage: number;
 }) {
   return (
     <div className="flex items-center gap-3 p-3 rounded-lg bg-gray-50 dark:bg-gray-700/50">
@@ -752,6 +869,9 @@ function PaymentChip({
         <p className="text-xs text-gray-500 dark:text-gray-400">{label}</p>
         <p className="font-semibold text-gray-900 dark:text-white">
           {currency} {Number(value).toFixed(2)}
+        </p>
+        <p className="text-[11px] text-gray-500 dark:text-gray-400">
+          ({Number(percentage || 0).toFixed(0)}%)
         </p>
       </div>
     </div>
@@ -1275,7 +1395,7 @@ function InventoryFinanceTab({
                 onClick={() => onNavigate("/inventory?filter=low_stock")}
                 className="mt-3 text-sm text-emerald-600 hover:underline"
               >
-                View in inventory â†’
+                View in inventory {'->'}
               </button>
             </div>
           )}
@@ -1309,7 +1429,7 @@ function InventoryFinanceTab({
                 onClick={() => onNavigate("/inventory")}
                 className="mt-3 text-sm text-emerald-600 hover:underline"
               >
-                View in inventory â†’
+                View in inventory {'->'}
               </button>
             </div>
           )}
@@ -2238,7 +2358,21 @@ function ReportsTab() {
   const [endDate, setEndDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [loading, setLoading] = useState(false);
   const [report, setReport] = useState<ComplianceExportData | null>(null);
+  const [comparisonData, setComparisonData] = useState<any>(null);
   const printRef = useRef<HTMLDivElement>(null);
+
+  const loadComparisonData = async () => {
+    try {
+      const res = await reportsApi.getSalesIntelligence();
+      setComparisonData(res.data?.data || null);
+    } catch {
+      setComparisonData(null);
+    }
+  };
+
+  useEffect(() => {
+    loadComparisonData();
+  }, []);
 
   const generateReport = async () => {
     setLoading(true);
@@ -2253,6 +2387,7 @@ function ReportsTab() {
       }
       const res = await reportsApi.getComplianceExport(params as any);
       setReport(res.data.data);
+      loadComparisonData();
     } catch (e: any) {
       toast.error(e.response?.data?.error?.message || "Failed to load report");
     } finally {
@@ -2295,6 +2430,52 @@ function ReportsTab() {
       breakdown
     );
     window.location.href = `mailto:?subject=${subject}&body=${body}`;
+  };
+
+  const comparison = comparisonData?.dailyComparison || {};
+  const recent = comparisonData?.recentDailyMetrics || [];
+  const revenueSeries = recent.map((d: any) => Number(d?.revenue || 0));
+  const expenseSeries = recent.map((d: any) => Number(d?.expenses || 0));
+  const profitSeries = recent.map((d: any) => Number(d?.profit || 0));
+
+  const MetricCard = ({
+    label,
+    value,
+    changePercent,
+    series,
+    positiveGood = true,
+  }: {
+    label: string;
+    value: number;
+    changePercent?: number;
+    series: number[];
+    positiveGood?: boolean;
+  }) => {
+    const change = Number(changePercent || 0);
+    const isUp = change >= 0;
+    const isPositive = positiveGood ? isUp : !isUp;
+    const trendColor = isPositive
+      ? "text-emerald-600 dark:text-emerald-400"
+      : "text-red-600 dark:text-red-400";
+    const valueColor = label.toLowerCase().includes("profit")
+      ? value >= 0
+        ? "text-emerald-600 dark:text-emerald-400"
+        : "text-red-600 dark:text-red-400"
+      : "text-gray-900 dark:text-white";
+    return (
+      <div className="rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 p-3">
+        <div className="flex items-center justify-between">
+          <p className="text-xs text-gray-500 dark:text-gray-400">{label}</p>
+          <span className={`text-xs font-semibold ${trendColor}`}>
+            {isUp ? "↑" : "↓"} {formatTrendPercent(change)}
+          </span>
+        </div>
+        <p className={`text-lg font-bold mt-1 ${valueColor}`}>
+          {currency} {Number(value || 0).toFixed(2)}
+        </p>
+        <MiniSparkline values={series} className="mt-2" />
+      </div>
+    );
   };
 
   return (
@@ -2380,6 +2561,35 @@ function ReportsTab() {
         </button>
       </div>
 
+      <div className="mb-6">
+        <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+          Today vs Yesterday
+        </h3>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <MetricCard
+            label="Revenue Today vs Yesterday"
+            value={Number(comparison.revenueToday || 0)}
+            changePercent={Number(comparison.revenueChangePercent || 0)}
+            series={revenueSeries}
+            positiveGood
+          />
+          <MetricCard
+            label="Expenses Today vs Yesterday"
+            value={Number(comparison.expenseToday || 0)}
+            changePercent={Number(comparison.expenseChangePercent || 0)}
+            series={expenseSeries}
+            positiveGood={false}
+          />
+          <MetricCard
+            label="Profit Today vs Yesterday"
+            value={Number(comparison.profitToday || 0)}
+            changePercent={Number(comparison.profitChangePercent || 0)}
+            series={profitSeries}
+            positiveGood
+          />
+        </div>
+      </div>
+
       {report && (
         <div ref={printRef} className="border border-gray-200 dark:border-gray-600 rounded-lg p-6 mb-6 bg-gray-50 dark:bg-gray-900/50">
           <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">{report.periodLabel}</h3>
@@ -2394,7 +2604,15 @@ function ReportsTab() {
             </div>
             <div className="flex justify-between border-t border-gray-200 dark:border-gray-600 pt-2">
               <span className="text-gray-600 dark:text-gray-400">Profit</span>
-              <span className="font-semibold text-emerald-600 dark:text-emerald-400">{currency} {Number(report.profit).toFixed(2)}</span>
+              <span
+                className={`font-semibold ${
+                  Number(report.profit) >= 0
+                    ? "text-emerald-600 dark:text-emerald-400"
+                    : "text-red-600 dark:text-red-400"
+                }`}
+              >
+                {currency} {Number(report.profit).toFixed(2)}
+              </span>
             </div>
             <div className="flex justify-between">
               <span className="text-gray-600 dark:text-gray-400">Transactions</span>
@@ -2450,6 +2668,7 @@ function ReportsTab() {
 function SettingsTab() {
   const navigate = useNavigate();
   const { user, setUserFromProfile } = useAuth();
+  const { themeMode, resolvedTheme, setThemeMode } = useTheme();
   const { currentShop } = useShop();
   const [profileForm, setProfileForm] = useState({ name: user?.name ?? "", email: user?.email ?? "" });
   const [passwordForm, setPasswordForm] = useState({
@@ -2664,6 +2883,52 @@ function SettingsTab() {
         >
           Open Sync Center
         </button>
+      </div>
+
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-6 border border-gray-200 dark:border-gray-700">
+        <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">Appearance</h3>
+        <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+          Choose how the app looks. Current theme:{" "}
+          <span className="font-medium text-gray-700 dark:text-gray-300 capitalize">{resolvedTheme}</span>
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          <button
+            type="button"
+            onClick={() => setThemeMode("light")}
+            className={`flex items-center justify-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium ${
+              themeMode === "light"
+                ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300"
+                : "border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
+            }`}
+          >
+            <Sun className="h-4 w-4" />
+            Light
+          </button>
+          <button
+            type="button"
+            onClick={() => setThemeMode("dark")}
+            className={`flex items-center justify-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium ${
+              themeMode === "dark"
+                ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300"
+                : "border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
+            }`}
+          >
+            <Moon className="h-4 w-4" />
+            Dark
+          </button>
+          <button
+            type="button"
+            onClick={() => setThemeMode("system")}
+            className={`flex items-center justify-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium ${
+              themeMode === "system"
+                ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300"
+                : "border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
+            }`}
+          >
+            <Monitor className="h-4 w-4" />
+            System
+          </button>
+        </div>
       </div>
 
       {/* Account / profile */}

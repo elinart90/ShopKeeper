@@ -51,15 +51,18 @@ import './index.css';
 import App from './App.tsx';
 import { AuthProvider } from './contexts/AuthContext';
 import { ShopProvider } from './contexts/ShopContext';
+import { ThemeProvider } from './contexts/ThemeContext';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <BrowserRouter>
-      <AuthProvider>
-        <ShopProvider>
-          <App />
-        </ShopProvider>
-      </AuthProvider>
+      <ThemeProvider>
+        <AuthProvider>
+          <ShopProvider>
+            <App />
+          </ShopProvider>
+        </AuthProvider>
+      </ThemeProvider>
     </BrowserRouter>
   </StrictMode>
 );

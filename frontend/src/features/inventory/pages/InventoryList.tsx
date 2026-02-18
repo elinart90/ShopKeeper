@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Plus, Search, Package, AlertTriangle, Edit, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { inventoryApi } from '../../../lib/api';
@@ -23,6 +23,7 @@ interface Product {
 export default function InventoryList() {
   const { currentShop } = useShop();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { online } = useOfflineStatus();
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
@@ -35,6 +36,13 @@ export default function InventoryList() {
       loadProducts();
     }
   }, [currentShop, filter]);
+
+  useEffect(() => {
+    const urlFilter = searchParams.get('filter');
+    if (urlFilter === 'low_stock' || urlFilter === 'out_of_stock' || urlFilter === 'all') {
+      setFilter(urlFilter);
+    }
+  }, [searchParams]);
 
   const loadProducts = async () => {
     if (!currentShop) return;
@@ -107,6 +115,10 @@ export default function InventoryList() {
 
   const isLowStock = (product: Product) => {
     return product.stock_quantity <= product.min_stock_level;
+  };
+
+  const isOutOfStock = (product: Product) => {
+    return product.stock_quantity <= 0;
   };
 
   if (!currentShop) {
@@ -247,7 +259,13 @@ export default function InventoryList() {
                   {products.map((product) => (
                     <tr
                       key={product.id}
-                      className="hover:bg-gray-50 dark:hover:bg-gray-700/50"
+                      className={`hover:bg-gray-50 dark:hover:bg-gray-700/50 ${
+                        isOutOfStock(product)
+                          ? 'bg-red-50/60 dark:bg-red-900/10'
+                          : isLowStock(product)
+                          ? 'bg-amber-50/60 dark:bg-amber-900/10'
+                          : ''
+                      }`}
                     >
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center">
@@ -255,12 +273,17 @@ export default function InventoryList() {
                             <div className="text-sm font-medium text-gray-900 dark:text-white">
                               {product.name}
                             </div>
-                            {isLowStock(product) && (
-                              <div className="flex items-center gap-1 text-xs text-orange-600 dark:text-orange-400 mt-1">
+                            {isOutOfStock(product) ? (
+                              <div className="inline-flex items-center gap-1 text-xs text-red-700 dark:text-red-300 mt-1 px-2 py-0.5 rounded bg-red-100 dark:bg-red-900/30">
+                                <AlertTriangle className="h-3 w-3" />
+                                Out of stock
+                              </div>
+                            ) : isLowStock(product) ? (
+                              <div className="inline-flex items-center gap-1 text-xs text-amber-700 dark:text-amber-300 mt-1 px-2 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30">
                                 <AlertTriangle className="h-3 w-3" />
                                 Low stock
                               </div>
-                            )}
+                            ) : null}
                           </div>
                         </div>
                       </td>
@@ -270,7 +293,15 @@ export default function InventoryList() {
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm text-gray-900 dark:text-white">
+                        <div
+                          className={`text-sm ${
+                            isOutOfStock(product)
+                              ? 'text-red-700 dark:text-red-300'
+                              : isLowStock(product)
+                              ? 'text-amber-700 dark:text-amber-300'
+                              : 'text-gray-900 dark:text-white'
+                          }`}
+                        >
                           {product.stock_quantity} {product.unit}
                         </div>
                         {product.min_stock_level > 0 && (

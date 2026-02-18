@@ -8,6 +8,19 @@ function toDateRange(startDate?: string, endDate?: string) {
   return { start, end };
 }
 
+function toIsoDateOnly(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
+function pctChange(today: number, yesterday: number): number {
+  if (!Number.isFinite(today) || !Number.isFinite(yesterday)) return 0;
+  if (yesterday === 0) {
+    if (today === 0) return 0;
+    return today > 0 ? 100 : -100;
+  }
+  return ((today - yesterday) / Math.abs(yesterday)) * 100;
+}
+
 /** When shop has data_cleared_at, dashboard only shows data on or after that time. */
 async function getDataClearedAt(shopId: string): Promise<string | null> {
   const { data } = await supabase
@@ -121,14 +134,21 @@ export class ReportsService {
 
       const { data: products } = await supabase
         .from('products')
-        .select('id, stock_quantity, min_stock_level')
+        .select('id, name, stock_quantity, min_stock_level')
         .eq('shop_id', shopId)
         .eq('is_active', true);
 
-      const lowStockCount =
-        (products || []).filter(
-          (p: any) => Number(p.stock_quantity) <= Number(p.min_stock_level || 0)
-        ).length;
+      const lowStockItems = (products || [])
+        .filter((p: any) => Number(p.stock_quantity) <= Number(p.min_stock_level || 0))
+        .map((p: any) => ({
+          productId: p.id,
+          name: p.name || 'Unnamed product',
+          stockQuantity: Number(p.stock_quantity || 0),
+          minStockLevel: Number(p.min_stock_level || 0),
+        }))
+        .sort((a, b) => a.stockQuantity - b.stockQuantity)
+        .slice(0, 5);
+      const lowStockCount = lowStockItems.length;
 
       return {
         totalSales,
@@ -137,6 +157,7 @@ export class ReportsService {
         salesProfit,
         totalTransactions,
         lowStockCount,
+        lowStockItems,
         averageTransaction:
           totalTransactions > 0 ? totalSales / totalTransactions : 0,
         paymentMethodBreakdown,
@@ -195,12 +216,108 @@ export class ReportsService {
         salesByStaff[id].count += 1;
       });
 
+      const now = new Date();
+      const todayStart = new Date(
+        Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0)
+      );
+      const tomorrowStart = new Date(todayStart);
+      tomorrowStart.setUTCDate(tomorrowStart.getUTCDate() + 1);
+      const yesterdayStart = new Date(todayStart);
+      yesterdayStart.setUTCDate(yesterdayStart.getUTCDate() - 1);
+      const sevenDaysAgoStart = new Date(todayStart);
+      sevenDaysAgoStart.setUTCDate(sevenDaysAgoStart.getUTCDate() - 6);
+
+      const dailyRevenueByDate: Record<string, number> = {};
+      const dailyExpenseByDate: Record<string, number> = {};
+      for (let i = 0; i < 7; i += 1) {
+        const d = new Date(sevenDaysAgoStart);
+        d.setUTCDate(d.getUTCDate() + i);
+        const dateKey = toIsoDateOnly(d);
+        dailyRevenueByDate[dateKey] = 0;
+        dailyExpenseByDate[dateKey] = 0;
+      }
+
+      let dailySalesQuery = supabase
+        .from('sales')
+        .select('final_amount, created_at')
+        .eq('shop_id', shopId)
+        .eq('status', 'completed')
+        .gte('created_at', sevenDaysAgoStart.toISOString())
+        .lt('created_at', tomorrowStart.toISOString());
+      if (dataClearedAt && dataClearedAt > sevenDaysAgoStart.toISOString()) {
+        dailySalesQuery = dailySalesQuery.gte('created_at', dataClearedAt);
+      }
+      const { data: dailySales } = await dailySalesQuery;
+      (dailySales || []).forEach((s: any) => {
+        const dateKey = String(s.created_at || '').slice(0, 10);
+        if (dateKey in dailyRevenueByDate) {
+          dailyRevenueByDate[dateKey] += Number(s.final_amount || 0);
+        }
+      });
+
+      const sevenDaysAgoDateOnly = toIsoDateOnly(sevenDaysAgoStart);
+      const todayDateOnly = toIsoDateOnly(todayStart);
+      let dailyExpensesQuery = supabase
+        .from('expenses')
+        .select('amount, expense_date')
+        .eq('shop_id', shopId)
+        .gte('expense_date', sevenDaysAgoDateOnly)
+        .lte('expense_date', todayDateOnly);
+      if (dataClearedAt) {
+        const clearedDateOnly = dataClearedAt.slice(0, 10);
+        if (clearedDateOnly > sevenDaysAgoDateOnly) {
+          dailyExpensesQuery = dailyExpensesQuery.gte('expense_date', clearedDateOnly);
+        }
+      }
+      const { data: dailyExpenses } = await dailyExpensesQuery;
+      (dailyExpenses || []).forEach((e: any) => {
+        const dateKey = String(e.expense_date || '').slice(0, 10);
+        if (dateKey in dailyExpenseByDate) {
+          dailyExpenseByDate[dateKey] += Number(e.amount || 0);
+        }
+      });
+
+      const todayKey = toIsoDateOnly(todayStart);
+      const yesterdayKey = toIsoDateOnly(yesterdayStart);
+      const revenueToday = Number(dailyRevenueByDate[todayKey] || 0);
+      const revenueYesterday = Number(dailyRevenueByDate[yesterdayKey] || 0);
+      const expenseToday = Number(dailyExpenseByDate[todayKey] || 0);
+      const expenseYesterday = Number(dailyExpenseByDate[yesterdayKey] || 0);
+      const profitToday = revenueToday - expenseToday;
+      const profitYesterday = revenueYesterday - expenseYesterday;
+      const recentDailyMetrics = Object.keys(dailyRevenueByDate)
+        .sort()
+        .map((date) => {
+          const revenue = Number(dailyRevenueByDate[date] || 0);
+          const expenses = Number(dailyExpenseByDate[date] || 0);
+          return {
+            date,
+            revenue,
+            expenses,
+            profit: revenue - expenses,
+          };
+        });
+
+      const dailyComparison = {
+        revenueToday,
+        revenueYesterday,
+        revenueChangePercent: pctChange(revenueToday, revenueYesterday),
+        expenseToday,
+        expenseYesterday,
+        expenseChangePercent: pctChange(expenseToday, expenseYesterday),
+        profitToday,
+        profitYesterday,
+        profitChangePercent: pctChange(profitToday, profitYesterday),
+      };
+
       if (saleIds.length === 0) {
         return {
           topProducts: [],
           slowMovingProducts: [],
           paymentMethodBreakdown,
           peakHours,
+          dailyComparison,
+          recentDailyMetrics,
           salesByStaff: Object.entries(salesByStaff).map(([staffId, v]) => ({ staffId, ...v })),
         };
       }
@@ -271,6 +388,8 @@ export class ReportsService {
         slowMovingProducts,
         paymentMethodBreakdown,
         peakHours,
+        dailyComparison,
+        recentDailyMetrics,
         salesByStaff: Object.entries(salesByStaff).map(([staffId, v]) => ({ staffId, ...v })),
       };
     } catch (error) {
