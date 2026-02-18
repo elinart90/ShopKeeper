@@ -38,6 +38,19 @@ export default function AddProductPage() {
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const handlingScanRef = useRef(false);
 
+  const disposeScanner = (scanner: Html5Qrcode) => {
+    Promise.resolve()
+      .then(() => scanner.stop())
+      .catch(() => {})
+      .finally(() => {
+        try {
+          scanner.clear();
+        } catch {
+          // ignore cleanup errors
+        }
+      });
+  };
+
   const [entryMode, setEntryMode] = useState<EntryMode>('choose');
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [cameraLoading, setCameraLoading] = useState(false);
@@ -116,13 +129,7 @@ export default function AddProductPage() {
     if (scannerRef.current) {
       const activeScanner = scannerRef.current;
       scannerRef.current = null;
-      activeScanner.stop().catch(() => {}).finally(() => {
-        try {
-          activeScanner.clear();
-        } catch {
-          // ignore cleanup errors
-        }
-      });
+      disposeScanner(activeScanner);
     }
     handlingScanRef.current = false;
     setScannedBarcode(code);
@@ -145,13 +152,7 @@ export default function AddProductPage() {
     if (scannerRef.current) {
       const activeScanner = scannerRef.current;
       scannerRef.current = null;
-      activeScanner.stop().catch(() => {}).finally(() => {
-        try {
-          activeScanner.clear();
-        } catch {
-          // ignore cleanup errors
-        }
-      });
+      disposeScanner(activeScanner);
     }
     handlingScanRef.current = false;
     setCameraLoading(false);
@@ -223,7 +224,7 @@ export default function AddProductPage() {
         scannerRef.current = scanner;
 
         await scanner.start(
-          { facingMode: { ideal: 'environment' } },
+          { facingMode: 'environment' },
           {
             fps: 12,
             qrbox: { width: 280, height: 150 },
@@ -272,13 +273,7 @@ export default function AddProductPage() {
       if (scannerRef.current) {
         const activeScanner = scannerRef.current;
         scannerRef.current = null;
-        activeScanner.stop().catch(() => {}).finally(() => {
-          try {
-            activeScanner.clear();
-          } catch {
-            // ignore cleanup errors
-          }
-        });
+        disposeScanner(activeScanner);
       }
       handlingScanRef.current = false;
     };

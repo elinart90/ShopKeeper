@@ -62,6 +62,19 @@ export default function NewSale() {
   const qrCodeRegionId = 'qr-reader';
   const qrCodeFileRegionId = 'qr-reader-file';
 
+  const disposeScanner = (scanner: Html5Qrcode) => {
+    Promise.resolve()
+      .then(() => scanner.stop())
+      .catch(() => {})
+      .finally(() => {
+        try {
+          scanner.clear();
+        } catch {
+          // ignore cleanup errors
+        }
+      });
+  };
+
   // Credit: customer selection
   const [creditCustomerId, setCreditCustomerId] = useState<string | null>(null);
   const [creditCustomerDisplay, setCreditCustomerDisplay] = useState<string>('');
@@ -124,13 +137,7 @@ export default function NewSale() {
     if (scannerRef.current) {
       const activeScanner = scannerRef.current;
       scannerRef.current = null;
-      activeScanner.stop().catch(() => {}).finally(() => {
-        try {
-          activeScanner.clear();
-        } catch {
-          // ignore cleanup errors
-        }
-      });
+      disposeScanner(activeScanner);
     }
     handlingScanRef.current = false;
     setScannerStarting(false);
@@ -202,7 +209,7 @@ export default function NewSale() {
         scannerRef.current = scanner;
 
         await scanner.start(
-          { facingMode: { ideal: 'environment' } },
+          { facingMode: 'environment' },
           {
             fps: 12,
             qrbox: { width: 280, height: 150 },
@@ -249,13 +256,7 @@ export default function NewSale() {
       if (scannerRef.current) {
         const activeScanner = scannerRef.current;
         scannerRef.current = null;
-        activeScanner.stop().catch(() => {}).finally(() => {
-          try {
-            activeScanner.clear();
-          } catch {
-            // ignore cleanup errors
-          }
-        });
+        disposeScanner(activeScanner);
       }
       handlingScanRef.current = false;
       setScannerStarting(false);
