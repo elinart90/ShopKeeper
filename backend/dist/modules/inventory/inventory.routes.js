@@ -6,21 +6,22 @@ const requireAuth_1 = require("../../middleware/requireAuth");
 const requireShop_1 = require("../../middleware/requireShop");
 const requireActiveSubscription_1 = require("../../middleware/requireActiveSubscription");
 const requireOwner_1 = require("../../middleware/requireOwner");
+const requirePermission_1 = require("../../middleware/requirePermission");
 const router = (0, express_1.Router)();
 const controller = new inventory_controller_1.InventoryController();
 router.use(requireAuth_1.requireAuth);
 router.use(requireActiveSubscription_1.requireActiveSubscription);
 router.use(requireShop_1.requireShop);
 // Products
-router.post('/products', (req, res, next) => controller.createProduct(req, res, next));
+router.post('/products', (0, requirePermission_1.requirePermission)('inventory.create'), (req, res, next) => controller.createProduct(req, res, next));
 router.get('/products', (req, res, next) => controller.getProducts(req, res, next));
 router.get('/products/check-duplicate', (req, res, next) => controller.checkDuplicate(req, res, next));
 router.get('/products/low-stock', (req, res, next) => controller.getLowStockProducts(req, res, next));
 router.get('/products/barcode/:barcode', (req, res, next) => controller.getProductByBarcode(req, res, next));
 router.get('/products/:id', (req, res, next) => controller.getProduct(req, res, next));
-router.patch('/products/:id', (req, res, next) => controller.updateProduct(req, res, next));
-router.post('/products/:id/receive-stock', (req, res, next) => controller.receiveStock(req, res, next));
-router.delete('/products/:id', (req, res, next) => controller.deleteProduct(req, res, next));
+router.patch('/products/:id', (0, requirePermission_1.requirePermission)('inventory.update'), (req, res, next) => controller.updateProduct(req, res, next));
+router.post('/products/:id/receive-stock', (0, requirePermission_1.requirePermission)('inventory.receive_stock'), (req, res, next) => controller.receiveStock(req, res, next));
+router.delete('/products/:id', (0, requirePermission_1.requirePermission)('inventory.delete'), (req, res, next) => controller.deleteProduct(req, res, next));
 router.get('/products/:id/history', (req, res, next) => controller.getStockHistory(req, res, next));
 // Categories
 router.post('/categories', requireOwner_1.requireOwner, (req, res, next) => controller.createCategory(req, res, next));

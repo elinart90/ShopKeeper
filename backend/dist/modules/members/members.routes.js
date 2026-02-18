@@ -5,6 +5,7 @@ const members_controller_1 = require("./members.controller");
 const requireAuth_1 = require("../../middleware/requireAuth");
 const requireShop_1 = require("../../middleware/requireShop");
 const requireActiveSubscription_1 = require("../../middleware/requireActiveSubscription");
+const requirePermission_1 = require("../../middleware/requirePermission");
 const router = (0, express_1.Router)();
 const controller = new members_controller_1.MembersController();
 router.use(requireAuth_1.requireAuth);
@@ -15,6 +16,6 @@ router.get('/credit-summary', (req, res, next) => controller.getCreditSummary(re
 router.get('/', (req, res, next) => controller.getCustomers(req, res, next));
 router.get('/:id', (req, res, next) => controller.getCustomer(req, res, next));
 router.patch('/:id', (req, res, next) => controller.updateCustomer(req, res, next));
-router.post('/:id/record-payment', (req, res, next) => controller.recordPayment(req, res, next));
+router.post('/:id/record-payment', (0, requirePermission_1.requirePermission)('customers.record_payment'), (req, res, next) => controller.recordPayment(req, res, next));
 exports.default = router;
 //# sourceMappingURL=members.routes.js.map

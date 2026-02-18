@@ -3,6 +3,7 @@ import { InventoryService } from './inventory.service';
 import { ShopRequest } from '../../middleware/requireShop';
 import { errorHandler, AppError } from '../../middleware/errorHandler';
 import { getParam } from '../../utils/params';
+import { logAuditAction } from '../controls/audit';
 
 const inventoryService = new InventoryService();
 
@@ -14,6 +15,14 @@ export class InventoryController {
       }
 
       const product = await inventoryService.createProduct(req.shopId, req.userId, req.body);
+      await logAuditAction({
+        shopId: req.shopId,
+        userId: req.userId,
+        action: 'inventory.create',
+        entityType: 'product',
+        entityId: product?.id,
+        after: product,
+      });
       res.status(201).json({ success: true, data: product });
     } catch (error) {
       errorHandler(error as AppError, req, res, next);
@@ -82,6 +91,15 @@ export class InventoryController {
       const qty = Number(quantity);
       if (!Number.isFinite(qty) || qty <= 0) throw new AppError('Valid quantity required', 400);
       const product = await inventoryService.receiveStock(req.shopId, id, req.userId, qty, note);
+      await logAuditAction({
+        shopId: req.shopId,
+        userId: req.userId,
+        action: 'inventory.receive_stock',
+        entityType: 'product',
+        entityId: id,
+        metadata: { quantity: qty, note: note || null },
+        after: product,
+      });
       res.json({ success: true, data: product });
     } catch (error) {
       errorHandler(error as AppError, req, res, next);
@@ -96,6 +114,14 @@ export class InventoryController {
 
       const id = getParam(req, 'id');
       const product = await inventoryService.updateProduct(id, req.shopId, req.userId, req.body);
+      await logAuditAction({
+        shopId: req.shopId,
+        userId: req.userId,
+        action: 'inventory.update',
+        entityType: 'product',
+        entityId: id,
+        after: product,
+      });
       res.json({ success: true, data: product });
     } catch (error) {
       errorHandler(error as AppError, req, res, next);
@@ -104,12 +130,19 @@ export class InventoryController {
 
   async deleteProduct(req: ShopRequest, res: Response, next: NextFunction) {
     try {
-      if (!req.shopId) {
-        throw new AppError('Shop ID is required', 400);
+      if (!req.shopId || !req.userId) {
+        throw new AppError('Shop ID and User ID are required', 400);
       }
 
       const id = getParam(req, 'id');
       await inventoryService.deleteProduct(id, req.shopId);
+      await logAuditAction({
+        shopId: req.shopId,
+        userId: req.userId,
+        action: 'inventory.delete',
+        entityType: 'product',
+        entityId: id,
+      });
       res.json({ success: true, message: 'Product deleted' });
     } catch (error) {
       errorHandler(error as AppError, req, res, next);

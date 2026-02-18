@@ -4,6 +4,7 @@ exports.MembersController = void 0;
 const members_service_1 = require("./members.service");
 const errorHandler_1 = require("../../middleware/errorHandler");
 const params_1 = require("../../utils/params");
+const audit_1 = require("../controls/audit");
 const membersService = new members_service_1.MembersService();
 class MembersController {
     async createCustomer(req, res, next) {
@@ -81,6 +82,15 @@ class MembersController {
                 throw new errorHandler_1.AppError('User ID is required', 401);
             }
             const customer = await membersService.recordCreditPayment(id, req.shopId, req.userId, amount, paymentMethod, notes);
+            await (0, audit_1.logAuditAction)({
+                shopId: req.shopId,
+                userId: req.userId,
+                action: 'customers.record_payment',
+                entityType: 'customer',
+                entityId: id,
+                metadata: { amount, paymentMethod },
+                after: customer,
+            });
             res.json({ success: true, data: customer });
         }
         catch (error) {

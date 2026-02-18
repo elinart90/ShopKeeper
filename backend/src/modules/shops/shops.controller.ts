@@ -4,6 +4,7 @@ import { AuthRequest } from '../../middleware/requireAuth';
 import { ShopRequest } from '../../middleware/requireShop';
 import { errorHandler, AppError } from '../../middleware/errorHandler';
 import { getParam } from '../../utils/params';
+import { logAuditAction } from '../controls/audit';
 
 const shopsService = new ShopsService();
 
@@ -83,6 +84,14 @@ export class ShopsController {
         password,
         role: role || 'staff',
       });
+      await logAuditAction({
+        shopId: req.shopId,
+        userId: req.userId,
+        action: 'staff.add_member',
+        entityType: 'shop_member',
+        entityId: String(result?.user_id || ''),
+        after: result,
+      });
       res.status(201).json({ success: true, data: result });
     } catch (error) {
       errorHandler(error as AppError, req, res, next);
@@ -109,6 +118,13 @@ export class ShopsController {
       const memberUserId = getParam(req, 'userId');
       if (!memberUserId) throw new AppError('Member user ID is required', 400);
       await shopsService.removeMember(req.shopId, memberUserId, req.userId);
+      await logAuditAction({
+        shopId: req.shopId,
+        userId: req.userId,
+        action: 'staff.remove_member',
+        entityType: 'shop_member',
+        entityId: memberUserId,
+      });
       res.json({ success: true, data: { removed: true } });
     } catch (error) {
       errorHandler(error as AppError, req, res, next);
@@ -123,6 +139,15 @@ export class ShopsController {
       const { newOwnerUserId } = req.body;
       if (!newOwnerUserId) throw new AppError('newOwnerUserId is required', 400);
       const result = await shopsService.transferOwnership(req.shopId, newOwnerUserId, req.userId);
+      await logAuditAction({
+        shopId: req.shopId,
+        userId: req.userId,
+        action: 'staff.transfer_ownership',
+        entityType: 'shop',
+        entityId: req.shopId,
+        metadata: { newOwnerUserId },
+        after: result,
+      });
       res.json({ success: true, data: result });
     } catch (error) {
       errorHandler(error as AppError, req, res, next);

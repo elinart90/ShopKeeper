@@ -93,6 +93,12 @@ api.interceptors.response.use(
 
     // 3. 401 — token expired or invalid → clear auth and redirect to sign-in
     if (error.response?.status === 401) {
+      // If device is offline, keep local session and let app continue in offline mode.
+      // This avoids forced sign-out when connectivity drops.
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        return Promise.reject(error);
+      }
+
       localStorage.removeItem(AUTH_STORAGE_KEY);
       localStorage.removeItem('currentShopId');
       delete (api.defaults.headers.common as Record<string, unknown>)['Authorization'];
@@ -218,6 +224,64 @@ export const reportsApi = {
     startDate?: string;
     endDate?: string;
   }) => api.get<{ success: boolean; data: ComplianceExportData }>('/reports/compliance-export', { params }),
+};
+
+export interface ShiftSession {
+  id: string;
+  user_id: string;
+  started_at: string;
+  ended_at?: string | null;
+  opening_cash: number;
+  expected_cash?: number | null;
+  closing_cash?: number | null;
+  discrepancy?: number | null;
+  status: 'open' | 'closed' | 'approved' | 'rejected';
+  notes?: string | null;
+}
+
+export interface CashDiscrepancy {
+  id: string;
+  shift_id: string;
+  user_id: string;
+  amount: number;
+  reason?: string | null;
+  status: 'open' | 'approved' | 'rejected';
+  reviewed_by?: string | null;
+  reviewed_at?: string | null;
+  created_at: string;
+}
+
+export interface AuditLog {
+  id: string;
+  user_id: string;
+  action: string;
+  entity_type: string;
+  entity_id?: string | null;
+  before_json?: unknown;
+  after_json?: unknown;
+  metadata?: Record<string, unknown>;
+  created_at: string;
+}
+
+export const controlsApi = {
+  startShift: (data: { opening_cash: number; notes?: string }) =>
+    api.post<{ success: boolean; data: ShiftSession }>('/controls/shifts/start', data),
+  endShift: (id: string, data: { closing_cash: number; notes?: string }) =>
+    api.post<{ success: boolean; data: { shift: ShiftSession; discrepancy?: CashDiscrepancy | null } }>(`/controls/shifts/${id}/end`, data),
+  getShifts: (params?: { userId?: string; status?: string; limit?: number }) =>
+    api.get<{ success: boolean; data: ShiftSession[] }>('/controls/shifts', { params }),
+  getDiscrepancies: (params?: { status?: string }) =>
+    api.get<{ success: boolean; data: CashDiscrepancy[] }>('/controls/discrepancies', { params }),
+  reviewDiscrepancy: (id: string, data: { status: 'approved' | 'rejected'; reason?: string }) =>
+    api.post<{ success: boolean; data: CashDiscrepancy }>(`/controls/discrepancies/${id}/review`, data),
+  getAuditLogs: (params?: { userId?: string; action?: string; limit?: number }) =>
+    api.get<{ success: boolean; data: AuditLog[] }>('/controls/audit-logs', { params }),
+  getPermissions: (userId: string, role?: string) =>
+    api.get<{ success: boolean; data: { defaults: string[]; overrides: Record<string, boolean> } }>(`/controls/permissions/${userId}`, {
+      params: role ? { role } : undefined,
+    }),
+  setPermissions: (userId: string, entries: Array<{ permissionKey: string; allowed: boolean }>) =>
+    api.put<{ success: boolean; data: { updated: boolean } }>(`/controls/permissions/${userId}`, { entries }),
 };
 
 export interface ComplianceExportData {

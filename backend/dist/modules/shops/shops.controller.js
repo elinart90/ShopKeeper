@@ -4,6 +4,7 @@ exports.ShopsController = void 0;
 const shops_service_1 = require("./shops.service");
 const errorHandler_1 = require("../../middleware/errorHandler");
 const params_1 = require("../../utils/params");
+const audit_1 = require("../controls/audit");
 const shopsService = new shops_service_1.ShopsService();
 class ShopsController {
     async createShop(req, res, next) {
@@ -81,6 +82,14 @@ class ShopsController {
                 password,
                 role: role || 'staff',
             });
+            await (0, audit_1.logAuditAction)({
+                shopId: req.shopId,
+                userId: req.userId,
+                action: 'staff.add_member',
+                entityType: 'shop_member',
+                entityId: String(result?.user_id || ''),
+                after: result,
+            });
             res.status(201).json({ success: true, data: result });
         }
         catch (error) {
@@ -108,6 +117,13 @@ class ShopsController {
             if (!memberUserId)
                 throw new errorHandler_1.AppError('Member user ID is required', 400);
             await shopsService.removeMember(req.shopId, memberUserId, req.userId);
+            await (0, audit_1.logAuditAction)({
+                shopId: req.shopId,
+                userId: req.userId,
+                action: 'staff.remove_member',
+                entityType: 'shop_member',
+                entityId: memberUserId,
+            });
             res.json({ success: true, data: { removed: true } });
         }
         catch (error) {
@@ -123,6 +139,15 @@ class ShopsController {
             if (!newOwnerUserId)
                 throw new errorHandler_1.AppError('newOwnerUserId is required', 400);
             const result = await shopsService.transferOwnership(req.shopId, newOwnerUserId, req.userId);
+            await (0, audit_1.logAuditAction)({
+                shopId: req.shopId,
+                userId: req.userId,
+                action: 'staff.transfer_ownership',
+                entityType: 'shop',
+                entityId: req.shopId,
+                metadata: { newOwnerUserId },
+                after: result,
+            });
             res.json({ success: true, data: result });
         }
         catch (error) {

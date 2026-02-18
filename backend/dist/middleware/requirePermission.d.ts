@@ -1,6 +1,5 @@
 import { Response, NextFunction } from 'express';
 import { ShopRequest } from './requireShop';
-type Permission = 'read' | 'write' | 'delete' | 'admin';
-export declare function requirePermission(permission: Permission): (req: ShopRequest, res: Response, next: NextFunction) => void;
-export {};
+export declare function requirePermission(permissionKey: string): (req: ShopRequest, res: Response, next: NextFunction) => Promise<void>;
+export declare function getDefaultPermissionsForRole(role: string | undefined): string[];
 //# sourceMappingURL=requirePermission.d.ts.map

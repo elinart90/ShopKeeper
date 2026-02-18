@@ -28,7 +28,7 @@ export class ReportsService {
 
       let salesQuery = supabase
         .from('sales')
-        .select('id, final_amount, payment_method, created_at, created_by')
+        .select('id, final_amount, payment_method, created_at, created_by, notes')
         .eq('shop_id', shopId)
         .eq('status', 'completed');
 
@@ -78,6 +78,13 @@ export class ReportsService {
           return sum + (lineRevenue - lineCost);
         }, 0);
       }
+
+      // Credit repayments are mirrored as sales records without sale_items.
+      // Count them as full gross profit on repayment day so dashboard KPIs update.
+      const creditRepaymentProfit = (filteredSales as any[])
+        .filter((s) => String(s.notes || '').includes('[CREDIT_REPAYMENT]'))
+        .reduce((sum, s) => sum + Number(s.final_amount || 0), 0);
+      salesProfit += creditRepaymentProfit;
 
       const paymentMethodBreakdown = (filteredSales as any[]).reduce(
         (acc: Record<string, number>, s) => {
@@ -378,7 +385,10 @@ export class ReportsService {
 
   async getExpensesProfitReport(shopId: string, startDate?: string, endDate?: string) {
     try {
-      const computeSalesProfitForSaleIds = async (saleIds: string[]) => {
+      const computeSalesProfitForSaleIds = async (
+        saleIds: string[],
+        repaymentAmountBySaleId?: Record<string, number>
+      ) => {
         if (!saleIds.length) return 0;
 
         const { data: saleItems } = await supabase
@@ -404,11 +414,18 @@ export class ReportsService {
           }, {});
         }
 
-        return items.reduce((sum, item) => {
+        const itemBasedProfit = items.reduce((sum, item) => {
           const lineRevenue = Number(item.total_price || 0);
           const lineCost = Number(costByProductId[item.product_id] || 0) * Number(item.quantity || 0);
           return sum + (lineRevenue - lineCost);
         }, 0);
+
+        const repaymentProfit = saleIds.reduce(
+          (sum, id) => sum + Number(repaymentAmountBySaleId?.[id] || 0),
+          0
+        );
+
+        return itemBasedProfit + repaymentProfit;
       };
 
       const { start: startTs, end: endTs } = toDateRange(startDate, endDate);
@@ -421,7 +438,7 @@ export class ReportsService {
 
       let salesQuery = supabase
         .from('sales')
-        .select('id, final_amount, created_at')
+        .select('id, final_amount, created_at, notes')
         .eq('shop_id', shopId)
         .eq('status', 'completed');
       if (effectiveStart) salesQuery = salesQuery.gte('created_at', effectiveStart);
@@ -429,8 +446,15 @@ export class ReportsService {
       const { data: sales } = await salesQuery;
       const salesList = sales || [];
       const totalRevenue = (salesList as any[]).reduce((s, r) => s + Number(r.final_amount || 0), 0);
+      const repaymentAmountBySaleId = (salesList as any[]).reduce((acc: Record<string, number>, s: any) => {
+        if (String(s.notes || '').includes('[CREDIT_REPAYMENT]') && s.id) {
+          acc[String(s.id)] = Number(s.final_amount || 0);
+        }
+        return acc;
+      }, {});
       const salesProfit = await computeSalesProfitForSaleIds(
-        (salesList as any[]).map((s) => s.id).filter(Boolean)
+        (salesList as any[]).map((s) => s.id).filter(Boolean),
+        repaymentAmountBySaleId
       );
 
       let expensesQuery = supabase
@@ -473,7 +497,7 @@ export class ReportsService {
       });
       const salesProfitByDay: Record<string, number> = {};
       for (const [day, ids] of Object.entries(saleIdsByDay)) {
-        salesProfitByDay[day] = await computeSalesProfitForSaleIds(ids);
+        salesProfitByDay[day] = await computeSalesProfitForSaleIds(ids, repaymentAmountBySaleId);
       }
       const expensesByDay: Record<string, number> = {};
       (expensesList as any[]).forEach((e) => {
@@ -512,14 +536,21 @@ export class ReportsService {
 
         const { data: ms } = await supabase
           .from('sales')
-          .select('id, final_amount')
+          .select('id, final_amount, notes')
           .eq('shop_id', shopId)
           .eq('status', 'completed')
           .gte('created_at', `${monthStart}T00:00:00.000Z`)
           .lte('created_at', `${monthEndStr}T23:59:59.999Z`);
         const monthRevenue = (ms || []).reduce((s: number, r: any) => s + Number(r.final_amount || 0), 0);
+        const monthRepaymentMap = (ms || []).reduce((acc: Record<string, number>, r: any) => {
+          if (String(r.notes || '').includes('[CREDIT_REPAYMENT]') && r.id) {
+            acc[String(r.id)] = Number(r.final_amount || 0);
+          }
+          return acc;
+        }, {});
         const monthSalesProfit = await computeSalesProfitForSaleIds(
-          (ms || []).map((r: any) => r.id).filter(Boolean)
+          (ms || []).map((r: any) => r.id).filter(Boolean),
+          monthRepaymentMap
         );
 
         const { data: me } = await supabase

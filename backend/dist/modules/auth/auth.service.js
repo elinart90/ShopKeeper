@@ -228,19 +228,31 @@ class AuthService {
      */
     async resolveUserId(userIdFromToken, emailFromToken) {
         const normalizedEmail = emailFromToken?.toLowerCase().trim();
-        const { data: byId } = await supabase_1.supabase
+        const { data: byId, error: byIdError } = await supabase_1.supabase
             .from('users')
             .select('id')
             .eq('id', userIdFromToken)
             .maybeSingle();
+        if (byIdError) {
+            logger_1.logger.error('resolveUserId lookup by id failed:', byIdError);
+            const err = new Error('Authentication service is temporarily unavailable. Please try again.');
+            err.statusCode = 503;
+            throw err;
+        }
         if (byId?.id)
             return byId.id;
         if (normalizedEmail) {
-            const { data: byEmail } = await supabase_1.supabase
+            const { data: byEmail, error: byEmailError } = await supabase_1.supabase
                 .from('users')
                 .select('id')
                 .eq('email', normalizedEmail)
                 .maybeSingle();
+            if (byEmailError) {
+                logger_1.logger.error('resolveUserId lookup by email failed:', byEmailError);
+                const err = new Error('Authentication service is temporarily unavailable. Please try again.');
+                err.statusCode = 503;
+                throw err;
+            }
             if (byEmail?.id)
                 return byEmail.id;
         }

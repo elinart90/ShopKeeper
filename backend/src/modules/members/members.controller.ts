@@ -3,6 +3,7 @@ import { MembersService } from './members.service';
 import { ShopRequest } from '../../middleware/requireShop';
 import { errorHandler, AppError } from '../../middleware/errorHandler';
 import { getParam } from '../../utils/params';
+import { logAuditAction } from '../controls/audit';
 
 const membersService = new MembersService();
 
@@ -94,6 +95,15 @@ export class MembersController {
         paymentMethod,
         notes
       );
+      await logAuditAction({
+        shopId: req.shopId,
+        userId: req.userId,
+        action: 'customers.record_payment',
+        entityType: 'customer',
+        entityId: id,
+        metadata: { amount, paymentMethod },
+        after: customer,
+      });
       res.json({ success: true, data: customer });
     } catch (error) {
       errorHandler(error as AppError, req, res, next);

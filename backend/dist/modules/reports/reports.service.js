@@ -26,7 +26,7 @@ class ReportsService {
             const effectiveStart = dataClearedAt && (!startTs || dataClearedAt > startTs) ? dataClearedAt : startTs;
             let salesQuery = supabase_1.supabase
                 .from('sales')
-                .select('id, final_amount, payment_method, created_at, created_by')
+                .select('id, final_amount, payment_method, created_at, created_by, notes')
                 .eq('shop_id', shopId)
                 .eq('status', 'completed');
             if (effectiveStart)
@@ -66,6 +66,12 @@ class ReportsService {
                     return sum + (lineRevenue - lineCost);
                 }, 0);
             }
+            // Credit repayments are mirrored as sales records without sale_items.
+            // Count them as full gross profit on repayment day so dashboard KPIs update.
+            const creditRepaymentProfit = filteredSales
+                .filter((s) => String(s.notes || '').includes('[CREDIT_REPAYMENT]'))
+                .reduce((sum, s) => sum + Number(s.final_amount || 0), 0);
+            salesProfit += creditRepaymentProfit;
             const paymentMethodBreakdown = filteredSales.reduce((acc, s) => {
                 const method = s.payment_method || 'cash';
                 acc[method] = (acc[method] || 0) + Number(s.final_amount || 0);
@@ -314,7 +320,7 @@ class ReportsService {
     }
     async getExpensesProfitReport(shopId, startDate, endDate) {
         try {
-            const computeSalesProfitForSaleIds = async (saleIds) => {
+            const computeSalesProfitForSaleIds = async (saleIds, repaymentAmountBySaleId) => {
                 if (!saleIds.length)
                     return 0;
                 const { data: saleItems } = await supabase_1.supabase
@@ -336,11 +342,13 @@ class ReportsService {
                         return acc;
                     }, {});
                 }
-                return items.reduce((sum, item) => {
+                const itemBasedProfit = items.reduce((sum, item) => {
                     const lineRevenue = Number(item.total_price || 0);
                     const lineCost = Number(costByProductId[item.product_id] || 0) * Number(item.quantity || 0);
                     return sum + (lineRevenue - lineCost);
                 }, 0);
+                const repaymentProfit = saleIds.reduce((sum, id) => sum + Number(repaymentAmountBySaleId?.[id] || 0), 0);
+                return itemBasedProfit + repaymentProfit;
             };
             const { start: startTs, end: endTs } = toDateRange(startDate, endDate);
             const dataClearedAt = await getDataClearedAt(shopId);
@@ -349,7 +357,7 @@ class ReportsService {
             const effectiveExpenseStart = clearedDateOnly && (!startDate || clearedDateOnly > startDate) ? clearedDateOnly : startDate;
             let salesQuery = supabase_1.supabase
                 .from('sales')
-                .select('id, final_amount, created_at')
+                .select('id, final_amount, created_at, notes')
                 .eq('shop_id', shopId)
                 .eq('status', 'completed');
             if (effectiveStart)
@@ -359,7 +367,13 @@ class ReportsService {
             const { data: sales } = await salesQuery;
             const salesList = sales || [];
             const totalRevenue = salesList.reduce((s, r) => s + Number(r.final_amount || 0), 0);
-            const salesProfit = await computeSalesProfitForSaleIds(salesList.map((s) => s.id).filter(Boolean));
+            const repaymentAmountBySaleId = salesList.reduce((acc, s) => {
+                if (String(s.notes || '').includes('[CREDIT_REPAYMENT]') && s.id) {
+                    acc[String(s.id)] = Number(s.final_amount || 0);
+                }
+                return acc;
+            }, {});
+            const salesProfit = await computeSalesProfitForSaleIds(salesList.map((s) => s.id).filter(Boolean), repaymentAmountBySaleId);
             let expensesQuery = supabase_1.supabase
                 .from('expenses')
                 .select('amount, expense_date, category_id, category:expense_categories(name)')
@@ -402,7 +416,7 @@ class ReportsService {
             });
             const salesProfitByDay = {};
             for (const [day, ids] of Object.entries(saleIdsByDay)) {
-                salesProfitByDay[day] = await computeSalesProfitForSaleIds(ids);
+                salesProfitByDay[day] = await computeSalesProfitForSaleIds(ids, repaymentAmountBySaleId);
             }
             const expensesByDay = {};
             expensesList.forEach((e) => {
@@ -432,13 +446,19 @@ class ReportsService {
                 const monthLabel = monthEnd.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
                 const { data: ms } = await supabase_1.supabase
                     .from('sales')
-                    .select('id, final_amount')
+                    .select('id, final_amount, notes')
                     .eq('shop_id', shopId)
                     .eq('status', 'completed')
                     .gte('created_at', `${monthStart}T00:00:00.000Z`)
                     .lte('created_at', `${monthEndStr}T23:59:59.999Z`);
                 const monthRevenue = (ms || []).reduce((s, r) => s + Number(r.final_amount || 0), 0);
-                const monthSalesProfit = await computeSalesProfitForSaleIds((ms || []).map((r) => r.id).filter(Boolean));
+                const monthRepaymentMap = (ms || []).reduce((acc, r) => {
+                    if (String(r.notes || '').includes('[CREDIT_REPAYMENT]') && r.id) {
+                        acc[String(r.id)] = Number(r.final_amount || 0);
+                    }
+                    return acc;
+                }, {});
+                const monthSalesProfit = await computeSalesProfitForSaleIds((ms || []).map((r) => r.id).filter(Boolean), monthRepaymentMap);
                 const { data: me } = await supabase_1.supabase
                     .from('expenses')
                     .select('amount')

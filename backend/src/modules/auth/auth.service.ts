@@ -254,18 +254,30 @@ export class AuthService {
    */
   async resolveUserId(userIdFromToken: string, emailFromToken?: string): Promise<string> {
     const normalizedEmail = emailFromToken?.toLowerCase().trim();
-    const { data: byId } = await supabase
+    const { data: byId, error: byIdError } = await supabase
       .from('users')
       .select('id')
       .eq('id', userIdFromToken)
       .maybeSingle();
+    if (byIdError) {
+      logger.error('resolveUserId lookup by id failed:', byIdError);
+      const err = new Error('Authentication service is temporarily unavailable. Please try again.') as AppError;
+      err.statusCode = 503;
+      throw err;
+    }
     if (byId?.id) return byId.id;
     if (normalizedEmail) {
-      const { data: byEmail } = await supabase
+      const { data: byEmail, error: byEmailError } = await supabase
         .from('users')
         .select('id')
         .eq('email', normalizedEmail)
         .maybeSingle();
+      if (byEmailError) {
+        logger.error('resolveUserId lookup by email failed:', byEmailError);
+        const err = new Error('Authentication service is temporarily unavailable. Please try again.') as AppError;
+        err.statusCode = 503;
+        throw err;
+      }
       if (byEmail?.id) return byEmail.id;
     }
     const err = new Error('User no longer exists. Please sign in again.') as AppError;

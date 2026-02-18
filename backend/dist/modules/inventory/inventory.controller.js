@@ -4,6 +4,7 @@ exports.InventoryController = void 0;
 const inventory_service_1 = require("./inventory.service");
 const errorHandler_1 = require("../../middleware/errorHandler");
 const params_1 = require("../../utils/params");
+const audit_1 = require("../controls/audit");
 const inventoryService = new inventory_service_1.InventoryService();
 class InventoryController {
     async createProduct(req, res, next) {
@@ -12,6 +13,14 @@ class InventoryController {
                 throw new errorHandler_1.AppError('Shop ID and User ID are required', 400);
             }
             const product = await inventoryService.createProduct(req.shopId, req.userId, req.body);
+            await (0, audit_1.logAuditAction)({
+                shopId: req.shopId,
+                userId: req.userId,
+                action: 'inventory.create',
+                entityType: 'product',
+                entityId: product?.id,
+                after: product,
+            });
             res.status(201).json({ success: true, data: product });
         }
         catch (error) {
@@ -79,6 +88,15 @@ class InventoryController {
             if (!Number.isFinite(qty) || qty <= 0)
                 throw new errorHandler_1.AppError('Valid quantity required', 400);
             const product = await inventoryService.receiveStock(req.shopId, id, req.userId, qty, note);
+            await (0, audit_1.logAuditAction)({
+                shopId: req.shopId,
+                userId: req.userId,
+                action: 'inventory.receive_stock',
+                entityType: 'product',
+                entityId: id,
+                metadata: { quantity: qty, note: note || null },
+                after: product,
+            });
             res.json({ success: true, data: product });
         }
         catch (error) {
@@ -92,6 +110,14 @@ class InventoryController {
             }
             const id = (0, params_1.getParam)(req, 'id');
             const product = await inventoryService.updateProduct(id, req.shopId, req.userId, req.body);
+            await (0, audit_1.logAuditAction)({
+                shopId: req.shopId,
+                userId: req.userId,
+                action: 'inventory.update',
+                entityType: 'product',
+                entityId: id,
+                after: product,
+            });
             res.json({ success: true, data: product });
         }
         catch (error) {
@@ -100,11 +126,18 @@ class InventoryController {
     }
     async deleteProduct(req, res, next) {
         try {
-            if (!req.shopId) {
-                throw new errorHandler_1.AppError('Shop ID is required', 400);
+            if (!req.shopId || !req.userId) {
+                throw new errorHandler_1.AppError('Shop ID and User ID are required', 400);
             }
             const id = (0, params_1.getParam)(req, 'id');
             await inventoryService.deleteProduct(id, req.shopId);
+            await (0, audit_1.logAuditAction)({
+                shopId: req.shopId,
+                userId: req.userId,
+                action: 'inventory.delete',
+                entityType: 'product',
+                entityId: id,
+            });
             res.json({ success: true, message: 'Product deleted' });
         }
         catch (error) {

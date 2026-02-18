@@ -20,6 +20,7 @@ const wallets_routes_1 = __importDefault(require("./modules/wallets/wallets.rout
 const daily_close_routes_1 = __importDefault(require("./modules/daily-close/daily-close.routes"));
 const payments_routes_1 = __importDefault(require("./modules/payments/payments.routes"));
 const subscriptions_routes_1 = __importDefault(require("./modules/subscriptions/subscriptions.routes"));
+const controls_routes_1 = __importDefault(require("./modules/controls/controls.routes"));
 const webhook_paystack_1 = require("./modules/payments/webhook.paystack");
 const app = (0, express_1.default)();
 // Middleware - allow frontend dev server, configured URL, and LAN IPs (for phone testing)
@@ -41,8 +42,15 @@ app.use((0, cors_1.default)({
 app.use('/api/webhooks/paystack', express_1.default.raw({ type: 'application/json' }), webhook_paystack_1.paystackWebhook);
 app.use(express_1.default.json());
 app.use(express_1.default.urlencoded({ extended: true }));
-// Health check
+// Root – so visiting / doesn't return "Cannot GET"
+app.get('/', (req, res) => {
+    res.json({ message: 'ShoopKeeper API', health: '/health', api: '/api/...' });
+});
+// Health check (Render and others often use /api/health)
 app.get('/health', (req, res) => {
+    res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+app.get('/api/health', (req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 // API Routes
@@ -58,6 +66,7 @@ app.use('/api/wallets', wallets_routes_1.default);
 app.use('/api/daily-close', daily_close_routes_1.default);
 app.use('/api/payments', payments_routes_1.default);
 app.use('/api/subscriptions', subscriptions_routes_1.default);
+app.use('/api/controls', controls_routes_1.default);
 // Error handling
 app.use(errorHandler_1.errorHandler);
 exports.default = app;

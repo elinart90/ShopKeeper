@@ -24,22 +24,41 @@ export const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
 const AUTH_STORAGE_KEY = 'shoopkeeper_auth';
 
+type StoredAuth = { user: AuthUser; token: string };
+
+function readStoredAuth(): StoredAuth | null {
+  const raw = localStorage.getItem(AUTH_STORAGE_KEY);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as StoredAuth;
+    if (!parsed?.token || !parsed?.user?.id || !parsed?.user?.email) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredAuth(payload: StoredAuth) {
+  localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(payload));
+}
+
+function clearStoredAuth() {
+  localStorage.removeItem(AUTH_STORAGE_KEY);
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const stored = localStorage.getItem(AUTH_STORAGE_KEY);
+    const stored = readStoredAuth();
     if (stored) {
-      try {
-        const parsed = JSON.parse(stored) as { user: AuthUser; token: string };
-        setUser(parsed.user);
-        setToken(parsed.token);
-        setAuthToken(parsed.token);
-      } catch {
-        localStorage.removeItem(AUTH_STORAGE_KEY);
-      }
+      setUser(stored.user);
+      setToken(stored.token);
+      setAuthToken(stored.token);
+    } else {
+      clearStoredAuth();
     }
     setLoading(false);
   }, []);
@@ -48,10 +67,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(newUser);
     setToken(newToken);
     setAuthToken(newToken);
-    localStorage.setItem(
-      AUTH_STORAGE_KEY,
-      JSON.stringify({ user: newUser, token: newToken })
-    );
+    writeStoredAuth({ user: newUser, token: newToken });
   };
 
   const login: AuthContextType['login'] = async ({ email, password }) => {
@@ -71,7 +87,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      throw new Error(body?.error?.message || body?.message || 'Invalid email or password');
+      if (res.status === 401) {
+        throw new Error(body?.error?.message || body?.message || 'Invalid email or password');
+      }
+      if (res.status >= 500) {
+        throw new Error('Server is unavailable. Please try again in a moment.');
+      }
+      throw new Error(body?.error?.message || body?.message || 'Sign in failed. Please try again.');
     }
 
     const body = await res.json();
@@ -108,7 +130,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
     setToken(null);
     setAuthToken('');
-    localStorage.removeItem(AUTH_STORAGE_KEY);
+    clearStoredAuth();
     localStorage.removeItem('currentShopId');
   };
 
@@ -124,18 +146,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const newUser = body.data;
         if (newUser) {
           setUser(newUser);
-          const stored = localStorage.getItem(AUTH_STORAGE_KEY);
-          if (stored) {
-            try {
-              const parsed = JSON.parse(stored) as { user: AuthUser; token: string };
-              localStorage.setItem(
-                AUTH_STORAGE_KEY,
-                JSON.stringify({ user: newUser, token: parsed.token })
-              );
-            } catch {
-              // ignore
-            }
-          }
+          const stored = readStoredAuth();
+          if (stored?.token) writeStoredAuth({ user: newUser, token: stored.token });
         }
       }
     } catch {
@@ -145,18 +157,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const setUserFromProfile = (newUser: AuthUser) => {
     setUser(newUser);
-    const stored = localStorage.getItem(AUTH_STORAGE_KEY);
-    if (stored) {
-      try {
-        const parsed = JSON.parse(stored) as { user: AuthUser; token: string };
-        localStorage.setItem(
-          AUTH_STORAGE_KEY,
-          JSON.stringify({ user: newUser, token: parsed.token })
-        );
-      } catch {
-        // ignore
-      }
-    }
+    const stored = readStoredAuth();
+    if (stored?.token) writeStoredAuth({ user: newUser, token: stored.token });
   };
 
   return (

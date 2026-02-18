@@ -27,7 +27,7 @@ import {
 } from "lucide-react";
 import { useShop } from "../../../contexts/useShop";
 import { useAuth } from "../../../contexts/useAuth";
-import { reportsApi, walletsApi, dailyCloseApi, shopsApi, salesApi, authApi, clearShopId } from "../../../lib/api";
+import { reportsApi, walletsApi, dailyCloseApi, shopsApi, salesApi, authApi, clearShopId, controlsApi } from "../../../lib/api";
 import type { ComplianceExportData } from "../../../lib/api";
 import toast from "react-hot-toast";
 import CreditTab from "../components/CreditTab";
@@ -1542,6 +1542,18 @@ function StaffTab({
   intelligence: any;
 }) {
   const { refreshShops } = useShop();
+  const permissionOptions = [
+    "sales.create",
+    "sales.cancel",
+    "inventory.create",
+    "inventory.update",
+    "inventory.receive_stock",
+    "inventory.delete",
+    "customers.record_payment",
+    "reports.view",
+    "wallets.manage",
+    "staff.view",
+  ];
   const [members, setMembers] = useState<any[]>([]);
   const [loadingMembers, setLoadingMembers] = useState(false);
   const [transferring, setTransferring] = useState(false);
@@ -1552,6 +1564,21 @@ function StaffTab({
     role: "staff",
   });
   const [addingStaff, setAddingStaff] = useState(false);
+  const [shifts, setShifts] = useState<any[]>([]);
+  const [loadingShifts, setLoadingShifts] = useState(false);
+  const [openingCash, setOpeningCash] = useState("");
+  const [closingCash, setClosingCash] = useState("");
+  const [shiftNote, setShiftNote] = useState("");
+  const [startingShift, setStartingShift] = useState(false);
+  const [endingShift, setEndingShift] = useState(false);
+  const [discrepancies, setDiscrepancies] = useState<any[]>([]);
+  const [loadingDiscrepancies, setLoadingDiscrepancies] = useState(false);
+  const [auditLogs, setAuditLogs] = useState<any[]>([]);
+  const [loadingAuditLogs, setLoadingAuditLogs] = useState(false);
+  const [selectedPermissionUserId, setSelectedPermissionUserId] = useState("");
+  const [permissionsDraft, setPermissionsDraft] = useState<Record<string, boolean>>({});
+  const [loadingPermissions, setLoadingPermissions] = useState(false);
+  const [savingPermissions, setSavingPermissions] = useState(false);
 
   const isOwner = currentShop?.role === "owner";
 
@@ -1571,6 +1598,56 @@ function StaffTab({
 
   useEffect(() => {
     if (isOwner && currentShop?.id) loadMembers();
+  }, [isOwner, currentShop?.id]);
+
+  const loadShifts = async () => {
+    if (!isOwner) return;
+    setLoadingShifts(true);
+    try {
+      const res = await controlsApi.getShifts({ limit: 20 });
+      setShifts(res.data.data || []);
+    } catch (e: any) {
+      toast.error(e?.response?.data?.error?.message || "Failed to load shifts");
+      setShifts([]);
+    } finally {
+      setLoadingShifts(false);
+    }
+  };
+
+  const loadDiscrepancies = async () => {
+    if (!isOwner) return;
+    setLoadingDiscrepancies(true);
+    try {
+      const res = await controlsApi.getDiscrepancies();
+      setDiscrepancies(res.data.data || []);
+    } catch (e: any) {
+      toast.error(e?.response?.data?.error?.message || "Failed to load discrepancies");
+      setDiscrepancies([]);
+    } finally {
+      setLoadingDiscrepancies(false);
+    }
+  };
+
+  const loadAuditLogs = async () => {
+    if (!isOwner) return;
+    setLoadingAuditLogs(true);
+    try {
+      const res = await controlsApi.getAuditLogs({ limit: 80 });
+      setAuditLogs(res.data.data || []);
+    } catch (e: any) {
+      toast.error(e?.response?.data?.error?.message || "Failed to load action logs");
+      setAuditLogs([]);
+    } finally {
+      setLoadingAuditLogs(false);
+    }
+  };
+
+  useEffect(() => {
+    if (isOwner && currentShop?.id) {
+      loadShifts();
+      loadDiscrepancies();
+      loadAuditLogs();
+    }
   }, [isOwner, currentShop?.id]);
 
   const handleRevoke = async (userId: string, name: string) => {
@@ -1631,6 +1708,97 @@ function StaffTab({
       toast.error(e?.response?.data?.error?.message || "Failed to transfer ownership");
     } finally {
       setTransferring(false);
+    }
+  };
+
+  const handleStartShift = async () => {
+    const amount = Number(openingCash || 0);
+    if (!Number.isFinite(amount) || amount < 0) {
+      toast.error("Enter a valid opening cash amount");
+      return;
+    }
+    setStartingShift(true);
+    try {
+      await controlsApi.startShift({ opening_cash: amount, notes: shiftNote.trim() || undefined });
+      toast.success("Shift started");
+      setOpeningCash("");
+      await loadShifts();
+    } catch (e: any) {
+      toast.error(e?.response?.data?.error?.message || "Failed to start shift");
+    } finally {
+      setStartingShift(false);
+    }
+  };
+
+  const handleEndShift = async () => {
+    const openShift = shifts.find((s) => s.status === "open");
+    if (!openShift?.id) {
+      toast.error("No open shift found");
+      return;
+    }
+    const amount = Number(closingCash);
+    if (!Number.isFinite(amount) || amount < 0) {
+      toast.error("Enter a valid closing cash amount");
+      return;
+    }
+    setEndingShift(true);
+    try {
+      await controlsApi.endShift(openShift.id, { closing_cash: amount, notes: shiftNote.trim() || undefined });
+      toast.success("Shift ended");
+      setClosingCash("");
+      setShiftNote("");
+      await Promise.all([loadShifts(), loadDiscrepancies()]);
+    } catch (e: any) {
+      toast.error(e?.response?.data?.error?.message || "Failed to end shift");
+    } finally {
+      setEndingShift(false);
+    }
+  };
+
+  const handleReviewDiscrepancy = async (id: string, status: "approved" | "rejected") => {
+    try {
+      await controlsApi.reviewDiscrepancy(id, { status });
+      toast.success(`Discrepancy ${status}`);
+      loadDiscrepancies();
+    } catch (e: any) {
+      toast.error(e?.response?.data?.error?.message || "Failed to review discrepancy");
+    }
+  };
+
+  const handleLoadPermissions = async (userId: string) => {
+    setSelectedPermissionUserId(userId);
+    const target = members.find((m: any) => m.user_id === userId);
+    setLoadingPermissions(true);
+    try {
+      const res = await controlsApi.getPermissions(userId, target?.role);
+      const defaults = (res.data.data?.defaults || []).reduce((acc: Record<string, boolean>, key: string) => {
+        acc[key] = true;
+        return acc;
+      }, {});
+      const overrides = res.data.data?.overrides || {};
+      setPermissionsDraft({ ...defaults, ...overrides });
+    } catch (e: any) {
+      toast.error(e?.response?.data?.error?.message || "Failed to load permissions");
+      setPermissionsDraft({});
+    } finally {
+      setLoadingPermissions(false);
+    }
+  };
+
+  const handleSavePermissions = async () => {
+    if (!selectedPermissionUserId) return;
+    setSavingPermissions(true);
+    try {
+      const entries = permissionOptions.map((permissionKey) => ({
+        permissionKey,
+        allowed: !!permissionsDraft[permissionKey],
+      }));
+      await controlsApi.setPermissions(selectedPermissionUserId, entries);
+      toast.success("Permissions updated");
+    } catch (e: any) {
+      toast.error(e?.response?.data?.error?.message || "Failed to save permissions");
+    } finally {
+      setSavingPermissions(false);
     }
   };
 
@@ -1834,11 +2002,223 @@ function StaffTab({
         </div>
       )}
 
-      {/* Coming soon */}
-      <div className="bg-gray-50 dark:bg-gray-800/50 rounded-xl p-4 border border-gray-200 dark:border-gray-700">
-        <p className="text-sm text-gray-500 dark:text-gray-400">
-          <strong>Coming soon:</strong> Cash discrepancies, shift start/end logs, action logs (who did what), and granular permissions per staff.
-        </p>
+      {/* Shift logs + cash discrepancy */}
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-4 border border-gray-200 dark:border-gray-700 space-y-4">
+        <h3 className="text-lg font-medium text-gray-900 dark:text-white">Shift logs & cash control</h3>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div>
+            <label className="block text-sm text-gray-600 dark:text-gray-300 mb-1">Opening cash</label>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={openingCash}
+              onChange={(e) => setOpeningCash(e.target.value)}
+              className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm"
+            />
+          </div>
+          <div>
+            <label className="block text-sm text-gray-600 dark:text-gray-300 mb-1">Closing cash</label>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={closingCash}
+              onChange={(e) => setClosingCash(e.target.value)}
+              className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm"
+            />
+          </div>
+          <div>
+            <label className="block text-sm text-gray-600 dark:text-gray-300 mb-1">Note</label>
+            <input
+              value={shiftNote}
+              onChange={(e) => setShiftNote(e.target.value)}
+              className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm"
+              placeholder="Optional note"
+            />
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button onClick={handleStartShift} disabled={startingShift} className="px-4 py-2 btn-primary-gradient text-sm disabled:opacity-50">
+            {startingShift ? "Starting..." : "Start shift"}
+          </button>
+          <button
+            onClick={handleEndShift}
+            disabled={endingShift}
+            className="px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-sm hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
+          >
+            {endingShift ? "Ending..." : "End shift"}
+          </button>
+          <button
+            onClick={() => {
+              loadShifts();
+              loadDiscrepancies();
+            }}
+            className="px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-sm hover:bg-gray-50 dark:hover:bg-gray-700"
+          >
+            Refresh logs
+          </button>
+        </div>
+
+        {loadingShifts ? (
+          <p className="text-sm text-gray-500 dark:text-gray-400">Loading shifts...</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-gray-500 dark:text-gray-400 border-b">
+                  <th className="pb-2">Staff</th>
+                  <th className="pb-2">Start</th>
+                  <th className="pb-2">End</th>
+                  <th className="pb-2">Expected</th>
+                  <th className="pb-2">Closing</th>
+                  <th className="pb-2">Discrepancy</th>
+                  <th className="pb-2">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {shifts.slice(0, 12).map((s: any) => (
+                  <tr key={s.id} className="border-b border-gray-100 dark:border-gray-700">
+                    <td className="py-2">{membersById[s.user_id]?.name || s.user_id?.slice(0, 8)}</td>
+                    <td className="py-2">{new Date(s.started_at).toLocaleString()}</td>
+                    <td className="py-2">{s.ended_at ? new Date(s.ended_at).toLocaleString() : "-"}</td>
+                    <td className="py-2">{s.expected_cash != null ? `${currency} ${Number(s.expected_cash).toFixed(2)}` : "-"}</td>
+                    <td className="py-2">{s.closing_cash != null ? `${currency} ${Number(s.closing_cash).toFixed(2)}` : "-"}</td>
+                    <td className={`py-2 ${Number(s.discrepancy || 0) === 0 ? "" : Number(s.discrepancy || 0) > 0 ? "text-emerald-600" : "text-red-600"}`}>
+                      {s.discrepancy != null ? `${currency} ${Number(s.discrepancy).toFixed(2)}` : "-"}
+                    </td>
+                    <td className="py-2 capitalize">{s.status}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        <h4 className="text-md font-medium text-gray-900 dark:text-white">Cash discrepancies</h4>
+        {loadingDiscrepancies ? (
+          <p className="text-sm text-gray-500 dark:text-gray-400">Loading discrepancies...</p>
+        ) : discrepancies.length === 0 ? (
+          <p className="text-sm text-gray-500 dark:text-gray-400">No discrepancies recorded.</p>
+        ) : (
+          <div className="space-y-2">
+            {discrepancies.slice(0, 10).map((d: any) => (
+              <div key={d.id} className="rounded-lg border border-gray-200 dark:border-gray-700 p-3 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p className={`font-medium ${Number(d.amount) >= 0 ? "text-emerald-600" : "text-red-600"}`}>
+                    {currency} {Number(d.amount).toFixed(2)}
+                  </p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    {new Date(d.created_at).toLocaleString()} - {d.status}
+                  </p>
+                </div>
+                {d.status === "open" && (
+                  <div className="flex gap-2">
+                    <button onClick={() => handleReviewDiscrepancy(d.id, "approved")} className="px-3 py-1 rounded border border-emerald-500 text-emerald-600 text-xs">
+                      Approve
+                    </button>
+                    <button onClick={() => handleReviewDiscrepancy(d.id, "rejected")} className="px-3 py-1 rounded border border-red-500 text-red-600 text-xs">
+                      Reject
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Granular permissions */}
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-4 border border-gray-200 dark:border-gray-700 space-y-3">
+        <h3 className="text-lg font-medium text-gray-900 dark:text-white">Granular permissions</h3>
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={selectedPermissionUserId}
+            onChange={(e) => {
+              const uid = e.target.value;
+              if (!uid) {
+                setSelectedPermissionUserId("");
+                setPermissionsDraft({});
+                return;
+              }
+              handleLoadPermissions(uid);
+            }}
+            className="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm"
+          >
+            <option value="">Select staff member</option>
+            {members.filter((m: any) => !m.is_owner).map((m: any) => (
+              <option key={m.user_id} value={m.user_id}>
+                {m.name} ({m.role})
+              </option>
+            ))}
+          </select>
+          <button
+            onClick={handleSavePermissions}
+            disabled={!selectedPermissionUserId || savingPermissions}
+            className="px-4 py-2 btn-primary-gradient text-sm disabled:opacity-50"
+          >
+            {savingPermissions ? "Saving..." : "Save permissions"}
+          </button>
+        </div>
+        {loadingPermissions ? (
+          <p className="text-sm text-gray-500 dark:text-gray-400">Loading permissions...</p>
+        ) : selectedPermissionUserId ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+            {permissionOptions.map((key) => (
+              <label key={key} className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                <input
+                  type="checkbox"
+                  checked={!!permissionsDraft[key]}
+                  onChange={(e) => setPermissionsDraft((prev) => ({ ...prev, [key]: e.target.checked }))}
+                />
+                <span>{key}</span>
+              </label>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-gray-500 dark:text-gray-400">Choose a staff member to edit permissions.</p>
+        )}
+      </div>
+
+      {/* Action logs */}
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-4 border border-gray-200 dark:border-gray-700">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-lg font-medium text-gray-900 dark:text-white">Action logs</h3>
+          <button
+            onClick={loadAuditLogs}
+            className="px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 text-sm"
+          >
+            Refresh
+          </button>
+        </div>
+        {loadingAuditLogs ? (
+          <p className="text-sm text-gray-500 dark:text-gray-400">Loading action logs...</p>
+        ) : auditLogs.length === 0 ? (
+          <p className="text-sm text-gray-500 dark:text-gray-400">No action logs yet.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-gray-500 dark:text-gray-400 border-b">
+                  <th className="pb-2">Time</th>
+                  <th className="pb-2">User</th>
+                  <th className="pb-2">Action</th>
+                  <th className="pb-2">Entity</th>
+                </tr>
+              </thead>
+              <tbody>
+                {auditLogs.slice(0, 50).map((log: any) => (
+                  <tr key={log.id} className="border-b border-gray-100 dark:border-gray-700">
+                    <td className="py-2">{new Date(log.created_at).toLocaleString()}</td>
+                    <td className="py-2">{membersById[log.user_id]?.name || log.user_id?.slice(0, 8)}</td>
+                    <td className="py-2">{log.action}</td>
+                    <td className="py-2">{log.entity_type}{log.entity_id ? ` (${String(log.entity_id).slice(0, 8)})` : ""}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -2068,6 +2448,7 @@ function ReportsTab() {
 }
 
 function SettingsTab() {
+  const navigate = useNavigate();
   const { user, setUserFromProfile } = useAuth();
   const { currentShop } = useShop();
   const [profileForm, setProfileForm] = useState({ name: user?.name ?? "", email: user?.email ?? "" });
@@ -2269,6 +2650,21 @@ function SettingsTab() {
   return (
     <div className="space-y-6 max-w-2xl">
       <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Settings</h2>
+
+      {/* Sync center moved from header to settings */}
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-6 border border-gray-200 dark:border-gray-700">
+        <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">Sync center</h3>
+        <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+          Manage offline queue, retries, and sync diagnostics from one page.
+        </p>
+        <button
+          type="button"
+          onClick={() => navigate("/sync-center")}
+          className="px-4 py-2 btn-primary-gradient rounded-lg"
+        >
+          Open Sync Center
+        </button>
+      </div>
 
       {/* Account / profile */}
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-6 border border-gray-200 dark:border-gray-700">

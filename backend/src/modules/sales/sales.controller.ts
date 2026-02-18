@@ -3,6 +3,7 @@ import { SalesService } from './sales.service';
 import { ShopRequest } from '../../middleware/requireShop';
 import { errorHandler, AppError } from '../../middleware/errorHandler';
 import { getParam } from '../../utils/params';
+import { logAuditAction } from '../controls/audit';
 
 const salesService = new SalesService();
 
@@ -14,6 +15,14 @@ export class SalesController {
       }
 
       const sale = await salesService.createSale(req.shopId, req.userId, req.body);
+      await logAuditAction({
+        shopId: req.shopId,
+        userId: req.userId,
+        action: 'sale.create',
+        entityType: 'sale',
+        entityId: sale?.id,
+        after: sale,
+      });
       res.status(201).json({ success: true, data: sale });
     } catch (error) {
       errorHandler(error as AppError, req, res, next);
@@ -68,6 +77,14 @@ export class SalesController {
 
       const id = getParam(req, 'id');
       const sale = await salesService.cancelSale(id, req.shopId, req.userId);
+      await logAuditAction({
+        shopId: req.shopId,
+        userId: req.userId,
+        action: 'sale.cancel',
+        entityType: 'sale',
+        entityId: id,
+        after: sale,
+      });
       res.json({ success: true, data: sale });
     } catch (error) {
       errorHandler(error as AppError, req, res, next);

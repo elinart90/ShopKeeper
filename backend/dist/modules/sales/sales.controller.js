@@ -4,6 +4,7 @@ exports.SalesController = void 0;
 const sales_service_1 = require("./sales.service");
 const errorHandler_1 = require("../../middleware/errorHandler");
 const params_1 = require("../../utils/params");
+const audit_1 = require("../controls/audit");
 const salesService = new sales_service_1.SalesService();
 class SalesController {
     async createSale(req, res, next) {
@@ -12,6 +13,14 @@ class SalesController {
                 throw new errorHandler_1.AppError('Shop ID and User ID are required', 400);
             }
             const sale = await salesService.createSale(req.shopId, req.userId, req.body);
+            await (0, audit_1.logAuditAction)({
+                shopId: req.shopId,
+                userId: req.userId,
+                action: 'sale.create',
+                entityType: 'sale',
+                entityId: sale?.id,
+                after: sale,
+            });
             res.status(201).json({ success: true, data: sale });
         }
         catch (error) {
@@ -59,6 +68,14 @@ class SalesController {
             }
             const id = (0, params_1.getParam)(req, 'id');
             const sale = await salesService.cancelSale(id, req.shopId, req.userId);
+            await (0, audit_1.logAuditAction)({
+                shopId: req.shopId,
+                userId: req.userId,
+                action: 'sale.cancel',
+                entityType: 'sale',
+                entityId: id,
+                after: sale,
+            });
             res.json({ success: true, data: sale });
         }
         catch (error) {

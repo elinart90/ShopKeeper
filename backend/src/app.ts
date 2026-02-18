@@ -16,6 +16,7 @@ import walletsRoutes from './modules/wallets/wallets.routes';
 import dailyCloseRoutes from './modules/daily-close/daily-close.routes';
 import paymentsRoutes from './modules/payments/payments.routes';
 import subscriptionsRoutes from './modules/subscriptions/subscriptions.routes';
+import controlsRoutes from './modules/controls/controls.routes';
 import { paystackWebhook } from './modules/payments/webhook.paystack';
 
 const app = express();
@@ -65,6 +66,7 @@ app.use('/api/wallets', walletsRoutes);
 app.use('/api/daily-close', dailyCloseRoutes);
 app.use('/api/payments', paymentsRoutes);
 app.use('/api/subscriptions', subscriptionsRoutes);
+app.use('/api/controls', controlsRoutes);
 
 // Error handling
 app.use(errorHandler);
