@@ -27,6 +27,26 @@ interface ShopContextType {
 
 export const ShopContext = createContext<ShopContextType | undefined>(undefined);
 
+// Cache shops in localStorage
+const SHOPS_CACHE_KEY = 'shoopkeeper_shops_cache';
+
+function getCachedShops(): Shop[] {
+  try {
+    const cached = localStorage.getItem(SHOPS_CACHE_KEY);
+    return cached ? JSON.parse(cached) : [];
+  } catch {
+    return [];
+  }
+}
+
+function setCachedShops(shops: Shop[]) {
+  try {
+    localStorage.setItem(SHOPS_CACHE_KEY, JSON.stringify(shops));
+  } catch (err) {
+    console.warn('Failed to cache shops', err);
+  }
+}
+
 export function ShopProvider({ children }: { children: ReactNode }) {
   const { user, loading: authLoading } = useAuth();
   const [currentShop, setCurrentShop] = useState<Shop | null>(null);
@@ -58,11 +78,34 @@ export function ShopProvider({ children }: { children: ReactNode }) {
   const refreshShops = async () => {
     try {
       if (!user) return;
+      
       setLoading(true);
       setLastError(null);
+      
+      // CRITICAL FIX: If offline, use cached shops
+      if (!navigator.onLine) {
+        console.log('📴 Offline - loading shops from cache');
+        const cachedShops = getCachedShops();
+        setShops(cachedShops);
+        
+        const savedShopId = getShopId();
+        const shopToSelect = savedShopId
+          ? cachedShops.find((s: Shop) => String(s.id) === String(savedShopId))
+          : null;
+        
+        if (shopToSelect) {
+          selectShop(shopToSelect);
+        }
+        
+        setLoading(false);
+        return;
+      }
+      
+      // Online - fetch from server
       const response = await shopsApi.getMyShops();
       const userShops = response.data.data || [];
       setShops(userShops);
+      setCachedShops(userShops); // Cache for offline use
 
       const savedShopId = getShopId();
       const shopToSelect = savedShopId
@@ -77,15 +120,34 @@ export function ShopProvider({ children }: { children: ReactNode }) {
     } catch (error: any) {
       const errMsg = error.response?.data?.error?.message || error.message || 'Unknown error';
       const status = error?.response?.status;
-      setLastError(errMsg);
-      console.error('Failed to fetch shops:', error);
+      
+      // CRITICAL FIX: Only clear shops on 401, otherwise use cache
       if (status === 401) {
+        setLastError('Please sign in again');
         toast.error('Please sign in again');
-      } else if (status !== 402) {
-        toast.error('Failed to load shops');
+        setShops([]);
+        setCurrentShop(null);
+      } else {
+        // Network error or other error - use cached shops
+        console.log('📴 Failed to fetch shops - using cache');
+        const cachedShops = getCachedShops();
+        if (cachedShops.length > 0) {
+          setShops(cachedShops);
+          const savedShopId = getShopId();
+          const shopToSelect = savedShopId
+            ? cachedShops.find((s: Shop) => String(s.id) === String(savedShopId))
+            : null;
+          if (shopToSelect) {
+            selectShop(shopToSelect);
+          }
+          toast('Using cached shops - offline mode', { icon: '📴' });
+        } else {
+          setLastError(errMsg);
+          if (status !== 402) {
+            toast.error('Failed to load shops');
+          }
+        }
       }
-      setShops([]);
-      setCurrentShop(null);
     } finally {
       setLoading(false);
     }

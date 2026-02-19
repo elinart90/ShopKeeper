@@ -87,17 +87,21 @@ export class InventoryController {
     try {
       if (!req.shopId || !req.userId) throw new AppError('Shop ID and User ID required', 400);
       const id = getParam(req, 'id');
-      const { quantity, note } = req.body || {};
+      const { quantity, note, unit_cost } = req.body || {};
       const qty = Number(quantity);
+      const unitCost = unit_cost != null ? Number(unit_cost) : undefined;
       if (!Number.isFinite(qty) || qty <= 0) throw new AppError('Valid quantity required', 400);
-      const product = await inventoryService.receiveStock(req.shopId, id, req.userId, qty, note);
+      if (unit_cost != null && (!Number.isFinite(unitCost as number) || Number(unitCost) < 0)) {
+        throw new AppError('unit_cost must be a valid non-negative number', 400);
+      }
+      const product = await inventoryService.receiveStock(req.shopId, id, req.userId, qty, note, unitCost);
       await logAuditAction({
         shopId: req.shopId,
         userId: req.userId,
         action: 'inventory.receive_stock',
         entityType: 'product',
         entityId: id,
-        metadata: { quantity: qty, note: note || null },
+        metadata: { quantity: qty, note: note || null, unit_cost: unitCost ?? null },
         after: product,
       });
       res.json({ success: true, data: product });

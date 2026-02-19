@@ -21,6 +21,15 @@ export class InventoryService {
     }
 
     if (validated.stock_quantity > 0) {
+      await this.addCostLayer(
+        shopId,
+        product.id,
+        userId,
+        Number(validated.stock_quantity),
+        Number(validated.cost_price || 0),
+        'initial_stock',
+        product.id
+      );
       await this.logStockMovement(
         shopId,
         product.id,
@@ -52,17 +61,40 @@ export class InventoryService {
     return result;
   }
 
-  async receiveStock(shopId: string, productId: string, userId: string, quantity: number, note?: string) {
+  async receiveStock(
+    shopId: string,
+    productId: string,
+    userId: string,
+    quantity: number,
+    note?: string,
+    unitCost?: number
+  ) {
     const product = await this.getProductById(productId);
     if (product.shop_id !== shopId) throw new Error('Product not found');
     const prev = Number(product.stock_quantity);
     const newQty = prev + quantity;
     if (newQty < 0) throw new Error('Stock cannot be negative');
+    const appliedUnitCost = Number.isFinite(unitCost as number)
+      ? Number(unitCost)
+      : Number(product.cost_price || 0);
     const { error } = await supabase
       .from('products')
-      .update({ stock_quantity: newQty, updated_at: new Date().toISOString() })
+      .update({
+        stock_quantity: newQty,
+        cost_price: appliedUnitCost,
+        updated_at: new Date().toISOString(),
+      })
       .eq('id', productId);
     if (error) throw new Error('Failed to update stock');
+    await this.addCostLayer(
+      shopId,
+      productId,
+      userId,
+      Number(quantity),
+      appliedUnitCost,
+      'purchase',
+      productId
+    );
     await this.logStockMovement(shopId, productId, userId, 'purchase', quantity, prev, newQty, note || 'Receive stock');
     return this.getProductById(productId);
   }
@@ -213,6 +245,29 @@ export class InventoryService {
       previous_quantity: previousQuantity,
       new_quantity: newQuantity,
       notes,
+      created_by: userId,
+    });
+  }
+
+  async addCostLayer(
+    shopId: string,
+    productId: string,
+    userId: string,
+    quantity: number,
+    unitCost: number,
+    sourceType: string,
+    sourceId?: string
+  ) {
+    if (!Number.isFinite(quantity) || quantity <= 0) return;
+    const safeCost = Number.isFinite(unitCost) ? Number(unitCost) : 0;
+    await supabase.from('stock_cost_layers').insert({
+      shop_id: shopId,
+      product_id: productId,
+      source_type: sourceType,
+      source_id: sourceId || null,
+      unit_cost: safeCost,
+      initial_quantity: Number(quantity),
+      remaining_quantity: Number(quantity),
       created_by: userId,
     });
   }

@@ -161,7 +161,7 @@ export const inventoryApi = {
     api.get('/inventory/products/check-duplicate', { params }),
   createProduct: (data: any) => api.post('/inventory/products', data),
   updateProduct: (id: string, data: any) => api.patch(`/inventory/products/${id}`, data),
-  receiveStock: (id: string, data: { quantity: number; note?: string }) =>
+  receiveStock: (id: string, data: { quantity: number; note?: string; unit_cost?: number }) =>
     api.post(`/inventory/products/${id}/receive-stock`, data),
   deleteProduct: (id: string) => api.delete(`/inventory/products/${id}`),
   getLowStock: () => api.get('/inventory/products/low-stock'),
@@ -174,7 +174,24 @@ export const salesApi = {
   getSales: (params?: any) => api.get('/sales', { params }),
   getSale: (id: string) => api.get(`/sales/${id}`),
   getSummary: (params?: any) => api.get('/sales/summary', { params }),
+  getGoodsSoldSummary: (params?: { startDate?: string; endDate?: string }) =>
+    api.get<{ success: boolean; data: Array<{
+      productId: string;
+      productName: string;
+      grossSoldQty: number;
+      returnedQty: number;
+      netSoldQty: number;
+      revenueGross: number;
+      costTotal: number;
+      avgCost: number;
+      netProfit: number;
+      costBreakdown: Array<{ quantity: number; unitCost: number }>;
+    }> }>('/sales/goods-sold-summary', { params }),
   cancelSale: (id: string) => api.post(`/sales/${id}/cancel`),
+  returnItem: (id: string, data: { sale_item_id: string; quantity: number; reason?: string }) =>
+    api.post(`/sales/${id}/return-item`, data),
+  partialRefund: (id: string, data: { amount: number; reason?: string }) =>
+    api.post(`/sales/${id}/partial-refund`, data),
 };
 
 export const customersApi = {
@@ -264,6 +281,116 @@ export interface AuditLog {
   created_at: string;
 }
 
+export interface StockSnapshot {
+  id: string;
+  period_type: 'daily' | 'weekly' | 'monthly';
+  period_key: string;
+  locked: boolean;
+  notes?: string | null;
+  created_by: string;
+  created_at: string;
+  itemsCount?: number;
+}
+
+export interface StockMovement {
+  id: string;
+  product_id?: string | null;
+  product_name: string;
+  movement_type: string;
+  quantity_before?: number | null;
+  quantity_change: number;
+  quantity_after?: number | null;
+  reason_code?: string | null;
+  reason_note?: string | null;
+  reference_type?: string | null;
+  reference_id?: string | null;
+  created_by: string;
+  created_at: string;
+}
+
+export interface StockVariance {
+  id: string;
+  product_id?: string | null;
+  product_name: string;
+  expected_qty: number;
+  counted_qty: number;
+  variance_qty: number;
+  unit_cost: number;
+  variance_value: number;
+  variance_percent: number;
+  severity: 'minor' | 'moderate' | 'critical' | 'severe';
+  reason_code: string;
+  reason_note?: string | null;
+  evidence_url?: string | null;
+  status: 'pending_review' | 'approved' | 'rejected' | 'auto_approved';
+  approval_level: 'auto' | 'supervisor' | 'owner';
+  reviewed_by?: string | null;
+  reviewed_at?: string | null;
+  created_by: string;
+  created_at: string;
+}
+
+export interface StockCountSession {
+  id: string;
+  title: string;
+  scope_type: 'all' | 'category' | 'section' | 'product_list';
+  scope_value?: string | null;
+  status: 'open' | 'submitted' | 'reconciliation_required' | 'completed' | 'cancelled';
+  started_by: string;
+  started_at: string;
+  submitted_at?: string | null;
+  completed_at?: string | null;
+}
+
+export interface StockCountItem {
+  id: string;
+  session_id: string;
+  product_id: string;
+  product_name: string;
+  expected_qty: number;
+  counted_qty_primary?: number | null;
+  counted_qty_secondary?: number | null;
+  requires_verification: boolean;
+  verification_status: 'not_required' | 'pending_second_count' | 'matched' | 'mismatch';
+  counted_by_primary?: string | null;
+  counted_by_secondary?: string | null;
+  photo_url?: string | null;
+  notes?: string | null;
+  updated_at: string;
+}
+
+export interface StockLocation {
+  id: string;
+  name: string;
+  location_type: string;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface StockLocationBalance {
+  id: string;
+  location_id: string;
+  product_id: string;
+  quantity: number;
+  updated_at: string;
+  location?: { id: string; name: string; location_type: string };
+  product?: { id: string; name: string; barcode?: string; sku?: string };
+}
+
+export interface StockTransfer {
+  id: string;
+  from_location_id: string;
+  to_location_id: string;
+  product_id: string;
+  quantity: number;
+  notes?: string | null;
+  status: string;
+  created_at: string;
+  fromLocation?: { id: string; name: string; location_type: string };
+  toLocation?: { id: string; name: string; location_type: string };
+  product?: { id: string; name: string; barcode?: string; sku?: string };
+}
+
 export const controlsApi = {
   startShift: (data: { opening_cash: number; notes?: string }) =>
     api.post<{ success: boolean; data: ShiftSession }>('/controls/shifts/start', data),
@@ -277,6 +404,112 @@ export const controlsApi = {
     api.post<{ success: boolean; data: CashDiscrepancy }>(`/controls/discrepancies/${id}/review`, data),
   getAuditLogs: (params?: { userId?: string; action?: string; limit?: number }) =>
     api.get<{ success: boolean; data: AuditLog[] }>('/controls/audit-logs', { params }),
+  createStockSnapshot: (data: { periodType: 'daily' | 'weekly' | 'monthly'; periodKey?: string; notes?: string }) =>
+    api.post<{ success: boolean; data: StockSnapshot }>('/controls/stock/snapshots', data),
+  getStockSnapshots: (params?: { limit?: number }) =>
+    api.get<{ success: boolean; data: StockSnapshot[] }>('/controls/stock/snapshots', { params }),
+  getStockMovements: (params?: { productId?: string; limit?: number }) =>
+    api.get<{ success: boolean; data: StockMovement[] }>('/controls/stock/movements', { params }),
+  getStockVariances: (params?: { status?: string; severity?: string; limit?: number }) =>
+    api.get<{ success: boolean; data: StockVariance[] }>('/controls/stock/variances', { params }),
+  recordStockVariance: (data: {
+    productId: string;
+    countedQty: number;
+    expectedQty?: number;
+    reasonCode: string;
+    reasonNote?: string;
+    evidenceUrl?: string;
+  }) => api.post<{ success: boolean; data: StockVariance }>('/controls/stock/variances', data),
+  reviewStockVariance: (id: string, data: { status: 'approved' | 'rejected'; note?: string }) =>
+    api.post<{ success: boolean; data: StockVariance }>(`/controls/stock/variances/${id}/review`, data),
+  getStockConfig: () =>
+    api.get<{
+      success: boolean;
+      data: {
+        reasonCodes: Record<string, string[]>;
+        thresholds: {
+          autoApprove: { maxUnitsExclusive: number; maxValueExclusive: number };
+          ownerReview: { minUnitsInclusive: number; minValueExclusive: number };
+        };
+        severity: Record<string, string>;
+      };
+    }>('/controls/stock/config'),
+  startStockCountSession: (data: {
+    title?: string;
+    scopeType?: 'all' | 'category' | 'section' | 'product_list';
+    scopeValue?: string;
+  }) => api.post<{ success: boolean; data: StockCountSession }>('/controls/stock/count-sessions', data),
+  getStockCountSessions: (params?: { limit?: number }) =>
+    api.get<{ success: boolean; data: StockCountSession[] }>('/controls/stock/count-sessions', { params }),
+  getStockCountProgress: (id: string) =>
+    api.get<{
+      success: boolean;
+      data: {
+        session: StockCountSession;
+        totalProducts: number;
+        countedProducts: number;
+        remainingProducts: number;
+        progressPercent: number;
+        mismatches: number;
+        pendingSecondCount: number;
+        progressText: string;
+      };
+    }>(`/controls/stock/count-sessions/${id}/progress`),
+  getStockCountItems: (id: string) =>
+    api.get<{ success: boolean; data: StockCountItem[] }>(`/controls/stock/count-sessions/${id}/items`),
+  recordStockCountItem: (id: string, data: { productId: string; countedQty: number; photoUrl?: string; notes?: string }) =>
+    api.post<{ success: boolean; data: StockCountItem }>(`/controls/stock/count-sessions/${id}/items`, data),
+  submitStockCountSession: (id: string) =>
+    api.post<{ success: boolean; data: { session: StockCountSession; variancesCreated: number; needsReconciliation: boolean } }>(
+      `/controls/stock/count-sessions/${id}/submit`
+    ),
+  getStockReminders: (params?: { thresholdDays?: number }) =>
+    api.get<{ success: boolean; data: Array<{ type: string; message: string; severity: 'info' | 'warning'; daysSinceLastCount?: number }> }>(
+      '/controls/stock/reminders',
+      { params }
+    ),
+  createStockLocation: (data: { name: string; locationType?: string }) =>
+    api.post<{ success: boolean; data: StockLocation }>('/controls/stock/locations', data),
+  getStockLocations: () =>
+    api.get<{ success: boolean; data: StockLocation[] }>('/controls/stock/locations'),
+  setLocationBalance: (data: { locationId: string; productId: string; quantity: number }) =>
+    api.put<{ success: boolean; data: StockLocationBalance }>('/controls/stock/location-balances', data),
+  getLocationBalances: (params?: { locationId?: string }) =>
+    api.get<{ success: boolean; data: StockLocationBalance[] }>('/controls/stock/location-balances', { params }),
+  createStockTransfer: (data: { fromLocationId: string; toLocationId: string; productId: string; quantity: number; notes?: string }) =>
+    api.post<{ success: boolean; data: StockTransfer }>('/controls/stock/transfers', data),
+  getStockTransfers: (params?: { limit?: number }) =>
+    api.get<{ success: boolean; data: StockTransfer[] }>('/controls/stock/transfers', { params }),
+  recordSupplierDelivery: (data: {
+    supplierName: string;
+    invoiceNumber?: string;
+    productId: string;
+    expectedQuantity: number;
+    receivedQuantity: number;
+    unitCost?: number;
+    deliveryPersonName?: string;
+    deliverySignature?: string;
+    photoUrl?: string;
+    notes?: string;
+    locationId?: string;
+  }) => api.post('/controls/stock/supplier-deliveries', data),
+  getSupplierScorecard: (params?: { supplierName?: string }) =>
+    api.get<{
+      success: boolean;
+      data: Array<{
+        supplierName: string;
+        deliveryAccuracyPercent: number;
+        averageShortagePercent: number;
+        deliveries: number;
+        perfectDeliveries: number;
+        shortDeliveries: number;
+      }>;
+    }>('/controls/stock/supplier-scorecard', { params }),
+  getPatternAlerts: () =>
+    api.get<{
+      success: boolean;
+      data: Array<{ type: string; severity: 'info' | 'warning' | 'critical'; message: string; metadata?: Record<string, unknown> }>;
+    }>('/controls/stock/pattern-alerts'),
   getPermissions: (userId: string, role?: string) =>
     api.get<{ success: boolean; data: { defaults: string[]; overrides: Record<string, boolean> } }>(`/controls/permissions/${userId}`, {
       params: role ? { role } : undefined,

@@ -4,7 +4,7 @@ export declare class InventoryService {
         existingByBarcode: any;
         possibleByName: any[];
     }>;
-    receiveStock(shopId: string, productId: string, userId: string, quantity: number, note?: string): Promise<any>;
+    receiveStock(shopId: string, productId: string, userId: string, quantity: number, note?: string, unitCost?: number): Promise<any>;
     getProducts(shopId: string, filters?: {
         category_id?: string;
         search?: string;
@@ -19,6 +19,7 @@ export declare class InventoryService {
     }>;
     getLowStockProducts(shopId: string): Promise<any[]>;
     logStockMovement(shopId: string, productId: string, userId: string, action: string, quantity: number, previousQuantity: number, newQuantity: number, notes?: string): Promise<void>;
+    addCostLayer(shopId: string, productId: string, userId: string, quantity: number, unitCost: number, sourceType: string, sourceId?: string): Promise<void>;
     getStockHistory(productId: string, limit?: number): Promise<any[]>;
     createCategory(shopId: string, data: {
         name: string;

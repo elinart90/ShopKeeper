@@ -71,6 +71,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const login: AuthContextType['login'] = async ({ email, password }) => {
+    // Check if offline - don't even try to login
+    if (!navigator.onLine) {
+      throw new Error('You are offline. Please connect to the internet to sign in.');
+    }
+
     const apiUrl = getApiBaseUrl() + '/auth/login';
     let res: Response;
     try {
@@ -102,6 +107,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const register: AuthContextType['register'] = async ({ name, email, password }) => {
+    // Check if offline - don't even try to register
+    if (!navigator.onLine) {
+      throw new Error('You are offline. Please connect to the internet to create an account.');
+    }
+
     const apiUrl = getApiBaseUrl() + '/auth/register';
     let res: Response;
     try {
@@ -136,11 +146,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const refreshUser = async () => {
     if (!token) return;
+    
+    // CRITICAL FIX: If offline, don't try to refresh - just keep using cached user
+    if (!navigator.onLine) {
+      console.log('📴 Offline - using cached user data');
+      return;
+    }
+
     const apiUrl = getApiBaseUrl() + '/auth/me';
     try {
       const res = await fetch(apiUrl, {
         headers: { Authorization: `Bearer ${token}` },
       });
+      
       if (res.ok) {
         const body = await res.json();
         const newUser = body.data;
@@ -149,9 +167,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const stored = readStoredAuth();
           if (stored?.token) writeStoredAuth({ user: newUser, token: stored.token });
         }
+      } else if (res.status === 401) {
+        // Only log out on 401 (unauthorized) - token is actually invalid
+        console.warn('Token invalid - logging out');
+        logout();
       }
-    } catch {
-      // ignore
+      // For other errors (500, network issues), keep the cached user
+    } catch (err) {
+      // CRITICAL FIX: Network error does NOT mean user is logged out
+      // Just keep using the cached credentials
+      console.log('📴 Network error during refresh - keeping cached user');
     }
   };
 

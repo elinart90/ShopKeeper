@@ -14,7 +14,10 @@ router.use(requireShop_1.requireShop);
 router.post('/', (0, requirePermission_1.requirePermission)('sales.create'), (req, res, next) => controller.createSale(req, res, next));
 router.get('/', (req, res, next) => controller.getSales(req, res, next));
 router.get('/summary', (req, res, next) => controller.getSalesSummary(req, res, next));
+router.get('/goods-sold-summary', (req, res, next) => controller.getGoodsSoldSummary(req, res, next));
 router.get('/:id', (req, res, next) => controller.getSale(req, res, next));
 router.post('/:id/cancel', (0, requirePermission_1.requirePermission)('sales.cancel'), (req, res, next) => controller.cancelSale(req, res, next));
+router.post('/:id/return-item', (0, requirePermission_1.requirePermission)('sales.cancel'), (req, res, next) => controller.returnSaleItem(req, res, next));
+router.post('/:id/partial-refund', (0, requirePermission_1.requirePermission)('sales.cancel'), (req, res, next) => controller.createPartialRefund(req, res, next));
 exports.default = router;
 //# sourceMappingURL=sales.routes.js.map

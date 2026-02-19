@@ -630,6 +630,7 @@ function OverviewTab({
                 value={cash}
                 currency={currency}
                 percentage={paymentTotal > 0 ? (Number(cash || 0) / paymentTotal) * 100 : 0}
+                noSales={paymentTotal <= 0}
               />
               <PaymentChip
                 icon={<Smartphone className="h-5 w-5" />}
@@ -637,6 +638,7 @@ function OverviewTab({
                 value={mobileMoney}
                 currency={currency}
                 percentage={paymentTotal > 0 ? (Number(mobileMoney || 0) / paymentTotal) * 100 : 0}
+                noSales={paymentTotal <= 0}
               />
               <PaymentChip
                 icon={<CreditCard className="h-5 w-5" />}
@@ -644,6 +646,7 @@ function OverviewTab({
                 value={card}
                 currency={currency}
                 percentage={paymentTotal > 0 ? (Number(card || 0) / paymentTotal) * 100 : 0}
+                noSales={paymentTotal <= 0}
               />
               <PaymentChip
                 icon={<Wallet className="h-5 w-5" />}
@@ -651,6 +654,7 @@ function OverviewTab({
                 value={other}
                 currency={currency}
                 percentage={paymentTotal > 0 ? (Number(other || 0) / paymentTotal) * 100 : 0}
+                noSales={paymentTotal <= 0}
               />
             </div>
           </div>
@@ -855,12 +859,14 @@ function PaymentChip({
   value,
   currency,
   percentage,
+  noSales,
 }: {
   icon: React.ReactNode;
   label: string;
   value: number;
   currency: string;
   percentage: number;
+  noSales: boolean;
 }) {
   const pct = Number(percentage || 0);
   const percentageLabel =
@@ -871,12 +877,20 @@ function PaymentChip({
       <div className="text-gray-500 dark:text-gray-400">{icon}</div>
       <div>
         <p className="text-xs text-gray-500 dark:text-gray-400">{label}</p>
-        <p className="font-semibold text-gray-900 dark:text-white">
-          {currency} {Number(value).toFixed(2)}
-        </p>
-        <p className="text-[11px] text-gray-500 dark:text-gray-400">
-          ({percentageLabel})
-        </p>
+        {noSales ? (
+          <p className="text-[11px] text-gray-500 dark:text-gray-400 animate-pulse">
+            No sales yet today
+          </p>
+        ) : (
+          <>
+            <p className="font-semibold text-gray-900 dark:text-white">
+              {currency} {Number(value).toFixed(2)}
+            </p>
+            <p className="text-[11px] text-gray-500 dark:text-gray-400 animate-pulse">
+              {percentageLabel}
+            </p>
+          </>
+        )}
       </div>
     </div>
   );
