@@ -1,13 +1,12 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { Menu, X } from "lucide-react";
 import { useAuth } from "../../contexts/useAuth";
 import { useOfflineStatus } from "../../hooks/useOfflineStatus";
 import { useSyncQueueCount } from "../../hooks/useSyncQueueCount";
 
 export default function Header() {
-  const { user, logout } = useAuth();
-  const navigate = useNavigate();
+  const { user } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const userDisplay = user?.name || user?.email || "Welcome!";
   const { online } = useOfflineStatus();
@@ -25,12 +24,6 @@ export default function Header() {
     { label: "Settings", to: "/dashboard?tab=settings" },
   ];
 
-  const handleSignOut = () => {
-    setMobileMenuOpen(false);
-    logout();
-    navigate("/", { replace: true });
-  };
-
   const closeMobileMenu = () => setMobileMenuOpen(false);
 
   const closeAllMenus = () => {
@@ -47,7 +40,7 @@ export default function Header() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" />
             </svg>
           </div>
-          <h1 className="text-base sm:text-xl font-bold text-gray-900 dark:text-gray-100 whitespace-nowrap">
+          <h1 className="text-base sm:text-xl font-bold text-gray-900 dark:text-white whitespace-nowrap">
             ShopKeeper
           </h1>
         </Link>
@@ -82,9 +75,6 @@ export default function Header() {
                 Dashboard
               </Link>
               <span className="text-sm text-gray-600 dark:text-gray-300">{userDisplay}</span>
-              <button onClick={handleSignOut} className="px-4 py-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg font-medium whitespace-nowrap">
-                Sign out
-              </button>
             </>
           )}
         </nav>
@@ -121,7 +111,7 @@ export default function Header() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" />
             </svg>
           </div>
-          <h1 className="text-lg font-bold text-gray-900 dark:text-gray-100 whitespace-nowrap">
+          <h1 className="text-lg font-bold text-gray-900 dark:text-white whitespace-nowrap">
             ShopKeeper
           </h1>
         </Link>
@@ -164,13 +154,6 @@ export default function Header() {
                 </Link>
               ))}
             </div>
-
-            <button
-              onClick={handleSignOut}
-              className="mt-3 w-full px-4 py-3 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg font-semibold text-center touch-manipulation whitespace-nowrap"
-            >
-              Sign out
-            </button>
           </div>
         </div>
       )}

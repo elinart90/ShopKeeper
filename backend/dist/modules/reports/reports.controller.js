@@ -56,11 +56,12 @@ class ReportsController {
             if (!req.shopId)
                 throw new errorHandler_1.AppError('Shop ID is required', 400);
             const type = req.query.type || 'daily';
-            if (!['daily', 'monthly', 'pl', 'tax'].includes(type)) {
-                throw new errorHandler_1.AppError('Invalid type. Use: daily, monthly, pl, tax', 400);
+            if (!['daily', 'weekly', 'monthly', 'pl', 'tax'].includes(type)) {
+                throw new errorHandler_1.AppError('Invalid type. Use: daily, weekly, monthly, pl, tax', 400);
             }
             const data = await reportsService.getComplianceExport(req.shopId, type, {
                 date: req.query.date,
+                week: req.query.week,
                 month: req.query.month,
                 startDate: req.query.startDate,
                 endDate: req.query.endDate,

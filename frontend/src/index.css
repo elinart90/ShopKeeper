@@ -13,7 +13,7 @@
 
   /* Backgrounds */
   --bg-light: #f8fafc;
-  --bg-dark: #0f172a;
+  --bg-dark: #0b1220;
 
   /* Spacing */
   --spacing-touch: 44px;
@@ -25,6 +25,31 @@
   /* Transitions */
   --transition-fast: 150ms ease;
   --transition-normal: 250ms ease;
+}
+
+/* Global dark surface tuning: make page backgrounds slightly darker app-wide */
+.dark .dark\:bg-gray-900 {
+  background-color: #0b1220;
+}
+
+.dark .dark\:bg-gray-800 {
+  background-color: #1f2a3d;
+}
+
+.dark .dark\:bg-gray-700 {
+  background-color: #2b374d;
+}
+
+.dark .dark\:border-gray-700 {
+  border-color: #334155;
+}
+
+.dark .dark\:text-gray-400 {
+  color: #a3b0c2;
+}
+
+.dark .dark\:text-gray-300 {
+  color: #c9d4e3;
 }
 
 /* =========================

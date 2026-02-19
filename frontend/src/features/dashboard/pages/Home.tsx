@@ -862,6 +862,10 @@ function PaymentChip({
   currency: string;
   percentage: number;
 }) {
+  const pct = Number(percentage || 0);
+  const percentageLabel =
+    pct > 0 && pct < 1 ? "<1%" : `${pct.toFixed(1)}%`;
+
   return (
     <div className="flex items-center gap-3 p-3 rounded-lg bg-gray-50 dark:bg-gray-700/50">
       <div className="text-gray-500 dark:text-gray-400">{icon}</div>
@@ -871,7 +875,7 @@ function PaymentChip({
           {currency} {Number(value).toFixed(2)}
         </p>
         <p className="text-[11px] text-gray-500 dark:text-gray-400">
-          ({Number(percentage || 0).toFixed(0)}%)
+          ({percentageLabel})
         </p>
       </div>
     </div>
@@ -2347,8 +2351,17 @@ function StaffTab({
 function ReportsTab() {
   const { currentShop } = useShop();
   const currency = currentShop?.currency || "GHS";
-  const [reportType, setReportType] = useState<"daily" | "monthly" | "pl" | "tax">("daily");
+  const [reportType, setReportType] = useState<"daily" | "weekly" | "monthly" | "pl" | "tax">("daily");
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [week, setWeek] = useState(() => {
+    const now = new Date();
+    const dateUtc = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
+    const day = dateUtc.getUTCDay() || 7;
+    dateUtc.setUTCDate(dateUtc.getUTCDate() + 4 - day);
+    const yearStart = new Date(Date.UTC(dateUtc.getUTCFullYear(), 0, 1));
+    const weekNo = Math.ceil((((dateUtc.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+    return `${dateUtc.getUTCFullYear()}-W${String(weekNo).padStart(2, "0")}`;
+  });
   const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const [startDate, setStartDate] = useState(() => {
     const d = new Date();
@@ -2380,6 +2393,7 @@ function ReportsTab() {
     try {
       const params: Record<string, string> = { type: reportType };
       if (reportType === "daily") params.date = date;
+      if (reportType === "weekly") params.week = week;
       if (reportType === "monthly") params.month = month;
       if (reportType === "pl" || reportType === "tax") {
         params.startDate = startDate;
@@ -2478,6 +2492,51 @@ function ReportsTab() {
     );
   };
 
+  const SalesRangeChart = ({
+    data,
+    currencyCode,
+  }: {
+    data: Array<{ label: string; value: number }>;
+    currencyCode: string;
+  }) => {
+    const maxValue = Math.max(0, ...data.map((d) => Number(d.value || 0)));
+    if (data.length === 0) {
+      return (
+        <div className="rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-900/40 p-4">
+          <p className="text-sm text-gray-500 dark:text-gray-400">No sales data points for this range.</p>
+        </div>
+      );
+    }
+
+    return (
+      <div className="rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-900/40 p-4">
+        <div className="h-44 flex items-end gap-2">
+          {data.map((point) => {
+            const value = Number(point.value || 0);
+            const heightPct = maxValue > 0 ? (value / maxValue) * 100 : 0;
+            return (
+              <div key={point.label} className="flex-1 min-w-0 flex flex-col items-center gap-1">
+                <div className="text-[10px] text-gray-500 dark:text-gray-400 truncate max-w-full">
+                  {value.toFixed(0)}
+                </div>
+                <div className="w-full h-32 flex items-end">
+                  <div
+                    title={`${point.label}: ${currencyCode} ${value.toFixed(2)}`}
+                    className="w-full rounded-t bg-gradient-to-t from-emerald-600 to-emerald-400"
+                    style={{ height: `${Math.max(6, heightPct)}%` }}
+                  />
+                </div>
+                <div className="text-[10px] text-gray-500 dark:text-gray-400 truncate max-w-full">
+                  {point.label}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-8 max-w-2xl">
       <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
@@ -2491,7 +2550,7 @@ function ReportsTab() {
         <div>
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Report type</label>
           <div className="flex flex-wrap gap-2">
-            {(["daily", "monthly", "pl", "tax"] as const).map((t) => (
+            {(["daily", "weekly", "monthly", "pl", "tax"] as const).map((t) => (
               <button
                 key={t}
                 type="button"
@@ -2502,7 +2561,15 @@ function ReportsTab() {
                     : "bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300"
                 }`}
               >
-                {t === "daily" ? "Daily (PDF)" : t === "monthly" ? "Monthly summary" : t === "pl" ? "Profit & Loss" : "Tax-ready"}
+                {t === "daily"
+                  ? "Daily (PDF)"
+                  : t === "weekly"
+                  ? "Weekly check"
+                  : t === "monthly"
+                  ? "Monthly summary"
+                  : t === "pl"
+                  ? "Profit & Loss"
+                  : "Tax-ready"}
               </button>
             ))}
           </div>
@@ -2514,6 +2581,17 @@ function ReportsTab() {
               type="date"
               value={date}
               onChange={(e) => setDate(e.target.value)}
+              className="w-full max-w-xs px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+            />
+          </div>
+        )}
+        {reportType === "weekly" && (
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Week</label>
+            <input
+              type="week"
+              value={week}
+              onChange={(e) => setWeek(e.target.value)}
               className="w-full max-w-xs px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
             />
           </div>
@@ -2593,6 +2671,22 @@ function ReportsTab() {
       {report && (
         <div ref={printRef} className="border border-gray-200 dark:border-gray-600 rounded-lg p-6 mb-6 bg-gray-50 dark:bg-gray-900/50">
           <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">{report.periodLabel}</h3>
+          {(reportType === "daily" || reportType === "weekly" || reportType === "monthly") && (
+            <div className="mb-4">
+              <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Sales chart ({reportType})
+              </h4>
+              <SalesRangeChart
+                currencyCode={currency}
+                data={(
+                  (report.dailyNetProfit || []).map((d) => ({
+                    label: String(d.date || "").slice(5),
+                    value: Number(d.revenue || 0),
+                  }))
+                )}
+              />
+            </div>
+          )}
           <dl className="grid grid-cols-1 gap-2 text-sm">
             <div className="flex justify-between">
               <span className="text-gray-600 dark:text-gray-400">Total sales</span>
@@ -2667,7 +2761,7 @@ function ReportsTab() {
 
 function SettingsTab() {
   const navigate = useNavigate();
-  const { user, setUserFromProfile } = useAuth();
+  const { user, setUserFromProfile, logout } = useAuth();
   const { themeMode, resolvedTheme, setThemeMode } = useTheme();
   const { currentShop } = useShop();
   const [profileForm, setProfileForm] = useState({ name: user?.name ?? "", email: user?.email ?? "" });
@@ -3172,6 +3266,23 @@ function SettingsTab() {
         <p className="text-sm text-gray-500 dark:text-gray-400">
           <strong>Shop settings</strong> (currency, timezone, receipt template, etc.) coming soon.
         </p>
+      </div>
+
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-6 border border-red-200 dark:border-red-900/40">
+        <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">Sign out</h3>
+        <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+          Sign out from this device and return to the home page.
+        </p>
+        <button
+          type="button"
+          onClick={() => {
+            logout();
+            navigate("/", { replace: true });
+          }}
+          className="w-full sm:w-auto px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white font-medium"
+        >
+          Sign out
+        </button>
       </div>
     </div>
   );

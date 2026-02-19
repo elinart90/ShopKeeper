@@ -218,8 +218,9 @@ export const reportsApi = {
   getExpensesProfit: (params?: { startDate?: string; endDate?: string }) =>
     api.get('/reports/expenses-profit', { params }),
   getComplianceExport: (params: {
-    type: 'daily' | 'monthly' | 'pl' | 'tax';
+    type: 'daily' | 'weekly' | 'monthly' | 'pl' | 'tax';
     date?: string;
+    week?: string;
     month?: string;
     startDate?: string;
     endDate?: string;

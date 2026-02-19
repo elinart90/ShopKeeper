@@ -707,11 +707,11 @@ export class ReportsService {
     }
   }
 
-  /** Compliance export: daily | monthly | pl | tax. Returns one payload for PDF/email. */
+  /** Compliance export: daily | weekly | monthly | pl | tax. Returns one payload for PDF/email. */
   async getComplianceExport(
     shopId: string,
-    type: 'daily' | 'monthly' | 'pl' | 'tax',
-    opts: { date?: string; startDate?: string; endDate?: string; month?: string }
+    type: 'daily' | 'weekly' | 'monthly' | 'pl' | 'tax',
+    opts: { date?: string; week?: string; startDate?: string; endDate?: string; month?: string }
   ) {
     let startDate: string | undefined;
     let endDate: string | undefined;
@@ -721,6 +721,25 @@ export class ReportsService {
       startDate = opts.date;
       endDate = opts.date;
       periodLabel = `Daily report – ${opts.date}`;
+    } else if (type === 'weekly' && opts.week) {
+      const m = /^(\d{4})-W(\d{2})$/.exec(opts.week);
+      if (!m) throw new Error('week must be in YYYY-Www format for weekly report');
+      const year = Number(m[1]);
+      const week = Number(m[2]);
+
+      // ISO week: week 1 contains Jan 4th, week starts Monday.
+      const jan4 = new Date(Date.UTC(year, 0, 4));
+      const jan4Day = jan4.getUTCDay() || 7; // convert Sun(0) -> 7
+      const mondayWeek1 = new Date(jan4);
+      mondayWeek1.setUTCDate(jan4.getUTCDate() - (jan4Day - 1));
+      const monday = new Date(mondayWeek1);
+      monday.setUTCDate(mondayWeek1.getUTCDate() + (week - 1) * 7);
+      const sunday = new Date(monday);
+      sunday.setUTCDate(monday.getUTCDate() + 6);
+
+      startDate = monday.toISOString().slice(0, 10);
+      endDate = sunday.toISOString().slice(0, 10);
+      periodLabel = `Weekly check – ${startDate} to ${endDate}`;
     } else if (type === 'monthly' && (opts.month || opts.date)) {
       const m = opts.month || (opts.date ? opts.date.slice(0, 7) : undefined);
       if (!m) throw new Error('month or date required for monthly report');

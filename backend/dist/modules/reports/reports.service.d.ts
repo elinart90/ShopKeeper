@@ -128,9 +128,10 @@ export declare class ReportsService {
             profit: number;
         }[];
     }>;
-    /** Compliance export: daily | monthly | pl | tax. Returns one payload for PDF/email. */
-    getComplianceExport(shopId: string, type: 'daily' | 'monthly' | 'pl' | 'tax', opts: {
+    /** Compliance export: daily | weekly | monthly | pl | tax. Returns one payload for PDF/email. */
+    getComplianceExport(shopId: string, type: 'daily' | 'weekly' | 'monthly' | 'pl' | 'tax', opts: {
         date?: string;
+        week?: string;
         startDate?: string;
         endDate?: string;
         month?: string;
@@ -144,7 +145,7 @@ export declare class ReportsService {
             expenses: number;
             profit: number;
         }[] | undefined;
-        type: "monthly" | "pl" | "daily" | "tax";
+        type: "monthly" | "pl" | "daily" | "weekly" | "tax";
         periodLabel: string;
         startDate: string;
         endDate: string;
