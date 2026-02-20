@@ -14,6 +14,8 @@ export default function Header() {
 
   const mobileDashboardLinks = [
     { label: "Dashboard", to: "/dashboard?tab=overview" },
+    { label: "New Sale", to: "/sales/new" },
+    { label: "Inventory", to: "/inventory" },
     { label: "Money Flow", to: "/dashboard?tab=money-flow" },
     { label: "Inventory Finance", to: "/dashboard?tab=inventory-finance" },
     { label: "Expenses & Profit", to: "/dashboard?tab=expenses" },
