@@ -22,6 +22,14 @@ import { enqueueOperation } from '../../../offline/offlineQueue';
 import { useOfflineStatus } from '../../../hooks/useOfflineStatus';
 import { useSyncQueueCount } from '../../../hooks/useSyncQueueCount';
 import { decodeBarcodeFromImageFile, PRODUCT_BARCODE_FORMATS } from '../../../lib/barcodeImageDecoder';
+import {
+  buildWhatsAppLink,
+  buildWhatsAppReceiptMessage,
+  createReceiptPdfFile,
+  normalizePhoneForWhatsApp,
+  triggerBlobDownload,
+  trySharePdfFile,
+} from '../utils/receiptShare';
 
 const PENDING_PAYSTACK_SALE_KEY = 'shoopkeeper_pending_paystack_sale';
 
@@ -85,6 +93,8 @@ export default function NewSale() {
   const [showNewCustomerForm, setShowNewCustomerForm] = useState(false);
   const [newCustomerName, setNewCustomerName] = useState('');
   const [newCustomerPhone, setNewCustomerPhone] = useState('');
+  const [receiptPromptSale, setReceiptPromptSale] = useState<any | null>(null);
+  const [receiptPhoneInput, setReceiptPhoneInput] = useState('');
 
   useEffect(() => {
     if (searchQuery) {
@@ -496,7 +506,8 @@ export default function NewSale() {
       const response = await salesApi.create(saleData as any);
       const sale = response.data.data;
       toast.success('Sale completed successfully!');
-      navigate(`/sales/${sale.id}`);
+      setReceiptPromptSale(sale);
+      setReceiptPhoneInput(String(sale?.customer?.phone || ''));
     } catch (error: any) {
       const isNetworkFailure = !!error?.networkError || !error?.response;
       if (isNetworkFailure && currentShop?.id) {
@@ -525,6 +536,63 @@ export default function NewSale() {
       console.error(error);
     } finally {
       setProcessing(false);
+    }
+  };
+
+  const handleSkipReceipt = () => {
+    const saleId = receiptPromptSale?.id;
+    setReceiptPromptSale(null);
+    setReceiptPhoneInput('');
+    if (saleId) navigate(`/sales/${saleId}`);
+  };
+
+  const handleSendReceipt = async () => {
+    if (!receiptPromptSale) return;
+    const normalizedPhone = normalizePhoneForWhatsApp(receiptPhoneInput, '233');
+    if (!normalizedPhone) {
+      toast.error('Enter a valid phone number (e.g. 024..., +233..., or 233...).');
+      return;
+    }
+
+    try {
+      const { blob, file, filename } = await createReceiptPdfFile({
+        sale: receiptPromptSale,
+        shopName: currentShop?.name || 'ShopKeeper',
+        shopAddress: currentShop?.address,
+        shopPhone: currentShop?.phone,
+        shopEmail: currentShop?.email,
+        cashierName: user?.name || user?.email || 'Cashier',
+        currency: currentShop?.currency || 'USD',
+      });
+
+      const shared = await trySharePdfFile(
+        file,
+        `Receipt ${receiptPromptSale?.sale_number || ''}`,
+        'Sales receipt'
+      );
+      if (shared) {
+        toast.success('Receipt shared successfully.');
+        handleSkipReceipt();
+        return;
+      }
+
+      // Fallback for browsers that cannot share files directly.
+      triggerBlobDownload(blob, filename);
+      const message = buildWhatsAppReceiptMessage({
+        sale: receiptPromptSale,
+        shopName: currentShop?.name || 'ShopKeeper',
+        currency: currentShop?.currency || 'USD',
+      });
+      const waUrl = buildWhatsAppLink(normalizedPhone, message);
+      const opened = window.open(waUrl, '_blank');
+      if (!opened) {
+        window.location.href = waUrl;
+      }
+      toast.success('PDF downloaded. Attach it in WhatsApp and send.');
+      handleSkipReceipt();
+    } catch (error) {
+      console.error(error);
+      toast.error('Failed to prepare receipt PDF.');
     }
   };
 
@@ -997,6 +1065,44 @@ export default function NewSale() {
           </div>
         </div>
       </div>
+      {receiptPromptSale && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+          <div className="w-full max-w-md rounded-xl bg-white dark:bg-gray-800 shadow-xl p-5">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Send receipt to customer?</h3>
+            <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
+              Share this completed sale via WhatsApp now.
+            </p>
+            <div className="mt-4">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Customer phone
+              </label>
+              <input
+                type="tel"
+                value={receiptPhoneInput}
+                onChange={(e) => setReceiptPhoneInput(e.target.value)}
+                placeholder="e.g. 0241234567 or +233241234567"
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+              />
+            </div>
+            <div className="mt-4 flex gap-2">
+              <button
+                type="button"
+                onClick={handleSkipReceipt}
+                className="flex-1 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
+              >
+                Skip
+              </button>
+              <button
+                type="button"
+                onClick={handleSendReceipt}
+                className="flex-1 py-2.5 rounded-lg btn-primary-gradient"
+              >
+                Send PDF receipt
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

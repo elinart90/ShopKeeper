@@ -5,10 +5,20 @@ import { Link } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { salesApi } from '../../../lib/api';
 import { useShop } from '../../../contexts/useShop';
+import { useAuth } from '../../../contexts/useAuth';
+import {
+  buildWhatsAppLink,
+  buildWhatsAppReceiptMessage,
+  createReceiptPdfFile,
+  normalizePhoneForWhatsApp,
+  triggerBlobDownload,
+  trySharePdfFile,
+} from '../utils/receiptShare';
 
 export default function SaleDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { currentShop } = useShop();
+  const { user } = useAuth();
   const navigate = useNavigate();
   const [sale, setSale] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -48,6 +58,50 @@ export default function SaleDetailPage() {
 
   const currency = currentShop.currency || 'USD';
   const isCreditRepayment = String(sale.notes || '').includes('[CREDIT_REPAYMENT]');
+  const shareReceipt = async () => {
+    const phoneInput =
+      sale?.customer?.phone ||
+      window.prompt('Enter customer WhatsApp number (e.g. 024..., +233..., or 233...)', '') ||
+      '';
+    const normalizedPhone = normalizePhoneForWhatsApp(phoneInput, '233');
+    if (!normalizedPhone) {
+      toast.error('Valid customer phone is required to send receipt.');
+      return;
+    }
+
+    try {
+      const { blob, file, filename } = await createReceiptPdfFile({
+        sale,
+        shopName: currentShop?.name || 'ShopKeeper',
+        shopAddress: currentShop?.address,
+        shopPhone: currentShop?.phone,
+        shopEmail: currentShop?.email,
+        cashierName: user?.name || user?.email || 'Cashier',
+        currency,
+      });
+      const shared = await trySharePdfFile(file, `Receipt ${sale?.sale_number || ''}`, 'Sales receipt');
+      if (shared) {
+        toast.success('Receipt shared successfully.');
+        return;
+      }
+
+      triggerBlobDownload(blob, filename);
+      const message = buildWhatsAppReceiptMessage({
+        sale,
+        shopName: currentShop?.name || 'ShopKeeper',
+        currency,
+      });
+      const waUrl = buildWhatsAppLink(normalizedPhone, message);
+      const opened = window.open(waUrl, '_blank');
+      if (!opened) {
+        window.location.href = waUrl;
+      }
+      toast.success('PDF downloaded. Attach it in WhatsApp and send.');
+    } catch (error) {
+      console.error(error);
+      toast.error('Failed to prepare receipt PDF.');
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-4">
@@ -126,6 +180,12 @@ export default function SaleDetailPage() {
           )}
 
           <div className="flex gap-3">
+            <button
+              onClick={shareReceipt}
+              className="flex-1 py-3 rounded-lg border border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/20"
+            >
+              Send PDF receipt
+            </button>
             <button
               onClick={() => navigate('/sales/new')}
               className="flex-1 py-3 rounded-lg btn-primary-gradient flex items-center justify-center gap-2"
