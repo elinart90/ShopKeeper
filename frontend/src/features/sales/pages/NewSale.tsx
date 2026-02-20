@@ -59,6 +59,7 @@ export default function NewSale() {
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const handlingScanRef = useRef(false);
+  const lastNotFoundToastAtRef = useRef(0);
   const qrCodeRegionId = 'qr-reader';
   const qrCodeFileRegionId = 'qr-reader-file';
 
@@ -175,6 +176,70 @@ export default function NewSale() {
     }
   };
 
+  const getBarcodeCandidates = (barcode: string) => {
+    const raw = String(barcode || '').trim();
+    const compact = raw.replace(/\s+/g, '');
+    const noGs1Prefix = compact.replace(/^\]C1/i, '');
+    const alnumOnly = compact.replace(/[^0-9A-Za-z]/g, '');
+    const fromQrPayload: string[] = [];
+
+    // QR content can be URL/JSON with barcode fields.
+    if (/^https?:\/\//i.test(raw)) {
+      try {
+        const url = new URL(raw);
+        const keys = [
+          'barcode',
+          'code',
+          'ean',
+          'ean13',
+          'upc',
+          'gtin',
+          'sku',
+          'product_code',
+        ];
+        keys.forEach((k) => {
+          const v = (url.searchParams.get(k) || '').trim();
+          if (v) fromQrPayload.push(v);
+        });
+
+        const pathTail = decodeURIComponent(url.pathname.split('/').filter(Boolean).pop() || '').trim();
+        if (pathTail && /[0-9A-Za-z]/.test(pathTail)) {
+          fromQrPayload.push(pathTail);
+        }
+      } catch {
+        // ignore malformed URLs
+      }
+    }
+
+    if (raw.startsWith('{') && raw.endsWith('}')) {
+      try {
+        const obj = JSON.parse(raw) as Record<string, unknown>;
+        const keys = ['barcode', 'code', 'ean', 'upc', 'gtin', 'sku', 'product_code'];
+        keys.forEach((k) => {
+          const v = String(obj?.[k] ?? '').trim();
+          if (v) fromQrPayload.push(v);
+        });
+      } catch {
+        // ignore invalid JSON payloads
+      }
+    }
+
+    const normalizedFromPayload = fromQrPayload.flatMap((v) => {
+      const t = String(v || '').trim();
+      if (!t) return [];
+      const c = t.replace(/\s+/g, '');
+      return [t, c, c.replace(/^\]C1/i, ''), c.replace(/[^0-9A-Za-z]/g, '')];
+    });
+
+    return Array.from(
+      new Set(
+        [raw, compact, noGs1Prefix, alnumOnly, ...normalizedFromPayload]
+          .map((v) => String(v || '').trim())
+          .filter((v) => v.length > 0)
+      )
+    );
+  };
+
   useEffect(() => {
     if (!scanning) return;
 
@@ -215,10 +280,7 @@ export default function NewSale() {
           { facingMode: 'environment' },
           {
             fps: 16,
-            qrbox: (viewfinderWidth: number, viewfinderHeight: number) => ({
-              width: Math.max(240, Math.min(420, Math.round(viewfinderWidth * 0.9))),
-              height: Math.max(120, Math.min(220, Math.round(viewfinderHeight * 0.3))),
-            }),
+            qrbox: { width: 280, height: 150 },
             disableFlip: true,
           },
           async (decodedText) => {
@@ -276,30 +338,38 @@ export default function NewSale() {
 
   const handleBarcodeScanned = async (barcode: string) => {
     try {
-      const code = String(barcode || '').trim();
-      if (!code) {
+      const candidates = getBarcodeCandidates(barcode);
+      if (!candidates.length) {
         handlingScanRef.current = false;
         return false;
       }
-      const response = await inventoryApi.getProductByBarcode(code);
-      const product = response.data.data;
-      
-      if (product) {
-        addToCart(product);
-        toast.success(`Added ${product.name}`);
-        return true;
-      } else {
-        toast.error('Product not found');
-        return false;
+
+      for (const code of candidates) {
+        try {
+          const response = await inventoryApi.getProductByBarcode(code);
+          const product = response.data.data;
+          if (product) {
+            addToCart(product);
+            toast.success(`Added ${product.name}`);
+            return true;
+          }
+        } catch (innerErr: any) {
+          if (innerErr?.response?.status !== 404) {
+            throw innerErr;
+          }
+        }
       }
+
+      const now = Date.now();
+      if (now - lastNotFoundToastAtRef.current > 1500) {
+        toast.error('Product not found');
+        lastNotFoundToastAtRef.current = now;
+      } else {
+      }
+      return false;
     } catch (error: any) {
-      if (error.response?.status === 404) {
-        toast.error('Product not found');
-        return false;
-      } else {
-        toast.error('Failed to fetch product');
-        return false;
-      }
+      toast.error('Failed to fetch product');
+      return false;
     } finally {
       // Reset lock for next frame if scanner is still open.
       handlingScanRef.current = false;
@@ -500,7 +570,7 @@ export default function NewSale() {
           <div className="lg:col-span-2 space-y-4">
             {/* Search Bar */}
             <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
-              <div className="flex gap-2">
+              <div className="flex flex-col sm:flex-row gap-2">
                 <div className="flex-1 relative">
                   <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
                   <input
@@ -511,25 +581,27 @@ export default function NewSale() {
                     className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
                   />
                 </div>
-                <button
-                  onClick={scanBarcode}
-                  disabled={fileScanning}
-                  className={`px-4 py-2 rounded-lg font-medium transition ${
-                    scanning
-                      ? 'bg-red-500 text-white hover:bg-red-600'
-                      : 'btn-primary-gradient'
-                  }`}
-                >
-                  <Scan className="h-5 w-5" />
-                </button>
-                <button
-                  type="button"
-                  onClick={openImagePicker}
-                  disabled={fileScanning}
-                  className="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-60"
-                >
-                  {fileScanning ? 'Reading image...' : 'Scan from gallery'}
-                </button>
+                <div className="flex gap-2 sm:w-auto">
+                  <button
+                    onClick={scanBarcode}
+                    disabled={fileScanning}
+                    className={`flex-1 sm:flex-none px-4 py-2 rounded-lg font-medium transition ${
+                      scanning
+                        ? 'bg-red-500 text-white hover:bg-red-600'
+                        : 'btn-primary-gradient'
+                    }`}
+                  >
+                    <Scan className="h-5 w-5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={openImagePicker}
+                    disabled={fileScanning}
+                    className="flex-1 sm:flex-none px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-60"
+                  >
+                    {fileScanning ? 'Reading image...' : 'Scan from gallery'}
+                  </button>
+                </div>
               </div>
               <input
                 ref={imageInputRef}
@@ -543,7 +615,13 @@ export default function NewSale() {
               {/* QR Scanner */}
               {scanning && (
                 <div className="mt-4">
-                  <div id={qrCodeRegionId} className="w-full"></div>
+                  <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Scan with camera</h3>
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">
+                    Point your camera at a barcode. It will be detected automatically.
+                  </p>
+                  <div className="relative aspect-[4/3] max-h-[52vh] rounded-xl overflow-hidden bg-black border border-gray-300 dark:border-gray-600">
+                    <div id={qrCodeRegionId} className="w-full h-full"></div>
+                  </div>
                   {scannerStarting && (
                     <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">Starting camera...</p>
                   )}
@@ -552,9 +630,9 @@ export default function NewSale() {
                   )}
                   <button
                     onClick={stopScanning}
-                    className="mt-2 w-full px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600"
+                    className="mt-3 w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
                   >
-                    Stop Scanning
+                    Stop camera
                   </button>
                 </div>
               )}
