@@ -5,11 +5,30 @@ import { logger } from '../../utils/logger';
 export class InventoryService {
   async createProduct(shopId: string, userId: string, data: any) {
     const validated = productSchema.parse(data);
+    const normalizedBarcode = String(validated.barcode || '').trim();
+
+    if (normalizedBarcode) {
+      const { data: existingByBarcode, error: barcodeErr } = await supabase
+        .from('products')
+        .select('id,name')
+        .eq('shop_id', shopId)
+        .eq('barcode', normalizedBarcode)
+        .eq('is_active', true)
+        .maybeSingle();
+      if (barcodeErr) {
+        logger.error('Error checking duplicate barcode:', barcodeErr);
+        throw new Error('Failed to validate barcode uniqueness');
+      }
+      if (existingByBarcode?.id) {
+        throw new Error(`Barcode already exists on product "${existingByBarcode.name}". Open that product and update stock instead.`);
+      }
+    }
 
     const { data: product, error: productError } = await supabase
       .from('products')
       .insert({
         ...validated,
+        barcode: normalizedBarcode || undefined,
         shop_id: shopId,
       })
       .select()
@@ -105,6 +124,7 @@ export class InventoryService {
     low_stock?: boolean;
     is_active?: boolean;
   }) {
+    const includeActiveOnly = filters?.is_active === undefined ? true : filters.is_active;
     let query = supabase
       .from('products')
       .select('*, category:categories(*)')
@@ -112,7 +132,7 @@ export class InventoryService {
       .order('created_at', { ascending: false });
 
     if (filters?.category_id) query = query.eq('category_id', filters.category_id);
-    if (filters?.is_active !== undefined) query = query.eq('is_active', filters.is_active);
+    query = query.eq('is_active', includeActiveOnly);
     if (filters?.search) {
       query = query.or(
         `name.ilike.%${filters.search}%,barcode.ilike.%${filters.search}%,sku.ilike.%${filters.search}%`
@@ -173,12 +193,37 @@ export class InventoryService {
     }
 
     const validated = productUpdateSchema.parse(data);
+    const normalizedBarcode =
+      validated.barcode !== undefined ? String(validated.barcode || '').trim() : undefined;
+
+    if (normalizedBarcode) {
+      const { data: dup, error: dupErr } = await supabase
+        .from('products')
+        .select('id,name')
+        .eq('shop_id', shopId)
+        .eq('barcode', normalizedBarcode)
+        .eq('is_active', true)
+        .neq('id', productId)
+        .maybeSingle();
+      if (dupErr) {
+        logger.error('Error checking duplicate barcode on update:', dupErr);
+        throw new Error('Failed to validate barcode uniqueness');
+      }
+      if (dup?.id) {
+        throw new Error(`Barcode already exists on product "${dup.name}".`);
+      }
+    }
+
     const previousQuantity = existing.stock_quantity;
     const newQuantity = validated.stock_quantity ?? previousQuantity;
 
     const { data: product, error } = await supabase
       .from('products')
-      .update({ ...validated, updated_at: new Date().toISOString() })
+      .update({
+        ...validated,
+        ...(normalizedBarcode !== undefined ? { barcode: normalizedBarcode || null } : {}),
+        updated_at: new Date().toISOString(),
+      })
       .eq('id', productId)
       .select()
       .single();
@@ -212,6 +257,21 @@ export class InventoryService {
       .eq('id', productId)
       .eq('shop_id', shopId);
     return { success: true };
+  }
+
+  async restoreProduct(productId: string, shopId: string) {
+    const { data: product, error } = await supabase
+      .from('products')
+      .update({ is_active: true, updated_at: new Date().toISOString() })
+      .eq('id', productId)
+      .eq('shop_id', shopId)
+      .select()
+      .single();
+    if (error || !product) {
+      logger.error('Error restoring product:', error);
+      throw new Error('Failed to restore product');
+    }
+    return product;
   }
 
   async getLowStockProducts(shopId: string) {

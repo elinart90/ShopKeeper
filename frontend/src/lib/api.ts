@@ -164,6 +164,7 @@ export const inventoryApi = {
   receiveStock: (id: string, data: { quantity: number; note?: string; unit_cost?: number }) =>
     api.post(`/inventory/products/${id}/receive-stock`, data),
   deleteProduct: (id: string) => api.delete(`/inventory/products/${id}`),
+  restoreProduct: (id: string) => api.post(`/inventory/products/${id}/restore`),
   getLowStock: () => api.get('/inventory/products/low-stock'),
   getCategories: () => api.get('/inventory/categories'),
   createCategory: (data: any) => api.post('/inventory/categories', data),

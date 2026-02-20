@@ -21,7 +21,7 @@ import { useAuth } from '../../../contexts/useAuth';
 import { enqueueOperation } from '../../../offline/offlineQueue';
 import { useOfflineStatus } from '../../../hooks/useOfflineStatus';
 import { useSyncQueueCount } from '../../../hooks/useSyncQueueCount';
-import { decodeBarcodeFromImageFile } from '../../../lib/barcodeImageDecoder';
+import { decodeBarcodeFromImageFile, PRODUCT_BARCODE_FORMATS } from '../../../lib/barcodeImageDecoder';
 
 const PENDING_PAYSTACK_SALE_KEY = 'shoopkeeper_pending_paystack_sale';
 
@@ -205,21 +205,32 @@ export default function NewSale() {
         setScannerError(null);
         handlingScanRef.current = false;
 
-        const scanner = new Html5Qrcode(qrCodeRegionId, { verbose: false });
+        const scanner = new Html5Qrcode(qrCodeRegionId, {
+          verbose: false,
+          formatsToSupport: PRODUCT_BARCODE_FORMATS,
+        });
         scannerRef.current = scanner;
 
         await scanner.start(
           { facingMode: 'environment' },
           {
-            fps: 12,
-            qrbox: { width: 280, height: 150 },
+            fps: 16,
+            qrbox: (viewfinderWidth: number, viewfinderHeight: number) => ({
+              width: Math.max(240, Math.min(420, Math.round(viewfinderWidth * 0.9))),
+              height: Math.max(120, Math.min(220, Math.round(viewfinderHeight * 0.3))),
+            }),
             disableFlip: true,
           },
           async (decodedText) => {
             if (handlingScanRef.current) return;
             handlingScanRef.current = true;
-            await handleBarcodeScanned(decodedText);
-            stopScanning();
+            const added = await handleBarcodeScanned(decodedText);
+            if (added) {
+              stopScanning();
+            } else {
+              // Keep scanner alive when scanned code is unknown.
+              handlingScanRef.current = false;
+            }
           },
           () => {
             // ignore per-frame decode errors
@@ -265,21 +276,33 @@ export default function NewSale() {
 
   const handleBarcodeScanned = async (barcode: string) => {
     try {
-      const response = await inventoryApi.getProductByBarcode(barcode);
+      const code = String(barcode || '').trim();
+      if (!code) {
+        handlingScanRef.current = false;
+        return false;
+      }
+      const response = await inventoryApi.getProductByBarcode(code);
       const product = response.data.data;
       
       if (product) {
         addToCart(product);
         toast.success(`Added ${product.name}`);
+        return true;
       } else {
         toast.error('Product not found');
+        return false;
       }
     } catch (error: any) {
       if (error.response?.status === 404) {
         toast.error('Product not found');
+        return false;
       } else {
         toast.error('Failed to fetch product');
+        return false;
       }
+    } finally {
+      // Reset lock for next frame if scanner is still open.
+      handlingScanRef.current = false;
     }
   };
 

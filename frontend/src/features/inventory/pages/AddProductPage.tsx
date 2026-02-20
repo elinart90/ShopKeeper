@@ -361,6 +361,10 @@ export default function AddProductPage() {
   };
 
   const handleConfirmSaveAnyway = () => {
+    if (duplicateCheck?.existingByBarcode) {
+      toast.error('Same barcode already exists. Open the existing product and update stock instead.');
+      return;
+    }
     if (pendingSubmit) doSave(pendingSubmit.withStock);
   };
 
@@ -857,10 +861,10 @@ export default function AddProductPage() {
               </button>
               <button
                 onClick={handleConfirmSaveAnyway}
-                disabled={saving}
+                disabled={saving || !!duplicateCheck.existingByBarcode}
                 className="flex-1 py-2 rounded-lg btn-primary-gradient"
               >
-                Save as new
+                {duplicateCheck.existingByBarcode ? 'Barcode must be unique' : 'Save as new'}
               </button>
             </div>
             <button

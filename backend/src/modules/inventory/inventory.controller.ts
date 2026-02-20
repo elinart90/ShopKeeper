@@ -153,6 +153,28 @@ export class InventoryController {
     }
   }
 
+  async restoreProduct(req: ShopRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.shopId || !req.userId) {
+        throw new AppError('Shop ID and User ID are required', 400);
+      }
+
+      const id = getParam(req, 'id');
+      const product = await inventoryService.restoreProduct(id, req.shopId);
+      await logAuditAction({
+        shopId: req.shopId,
+        userId: req.userId,
+        action: 'inventory.restore',
+        entityType: 'product',
+        entityId: id,
+        after: product,
+      });
+      res.json({ success: true, data: product });
+    } catch (error) {
+      errorHandler(error as AppError, req, res, next);
+    }
+  }
+
   async getLowStockProducts(req: ShopRequest, res: Response, next: NextFunction) {
     try {
       if (!req.shopId) {

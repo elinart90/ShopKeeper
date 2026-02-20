@@ -28,7 +28,7 @@ export default function InventoryList() {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
-  const [filter, setFilter] = useState<'all' | 'low_stock' | 'out_of_stock'>('all');
+  const [filter, setFilter] = useState<'all' | 'low_stock' | 'out_of_stock' | 'deleted'>('all');
   const [usingCache, setUsingCache] = useState(false);
 
   useEffect(() => {
@@ -39,7 +39,7 @@ export default function InventoryList() {
 
   useEffect(() => {
     const urlFilter = searchParams.get('filter');
-    if (urlFilter === 'low_stock' || urlFilter === 'out_of_stock' || urlFilter === 'all') {
+    if (urlFilter === 'low_stock' || urlFilter === 'out_of_stock' || urlFilter === 'all' || urlFilter === 'deleted') {
       setFilter(urlFilter);
     }
   }, [searchParams]);
@@ -56,9 +56,17 @@ export default function InventoryList() {
       if (filter === 'low_stock') {
         params.low_stock = true;
       }
+      if (filter === 'deleted') {
+        params.is_active = false;
+      } else {
+        params.is_active = true;
+      }
 
       const response = await inventoryApi.getProducts(params);
       let productsData = response.data.data || [];
+      if (filter !== 'deleted') {
+        productsData = productsData.filter((p: Product) => p.is_active !== false);
+      }
 
       if (filter === 'out_of_stock') {
         productsData = productsData.filter((p: Product) => p.stock_quantity === 0);
@@ -109,6 +117,18 @@ export default function InventoryList() {
       loadProducts();
     } catch (error: any) {
       toast.error('Failed to delete product');
+      console.error(error);
+    }
+  };
+
+  const handleRestore = async (productId: string) => {
+    if (!confirm('Restore this product?')) return;
+    try {
+      await inventoryApi.restoreProduct(productId);
+      toast.success('Product restored');
+      loadProducts();
+    } catch (error: any) {
+      toast.error('Failed to restore product');
       console.error(error);
     }
   };
@@ -203,6 +223,16 @@ export default function InventoryList() {
               }`}
             >
               Out of Stock
+            </button>
+            <button
+              onClick={() => setFilter('deleted')}
+              className={`px-4 py-2 rounded-lg transition ${
+                filter === 'deleted'
+                  ? 'bg-gray-700 text-white'
+                  : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600'
+              }`}
+            >
+              Deleted
             </button>
           </div>
         </div>
@@ -320,18 +350,29 @@ export default function InventoryList() {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                         <div className="flex items-center justify-end gap-2">
-                          <button
-                            onClick={() => navigate(`/inventory/${product.id}/edit`)}
-                            className="text-emerald-600 dark:text-emerald-400 hover:text-emerald-900 dark:hover:text-emerald-300"
-                          >
-                            <Edit className="h-4 w-4" />
-                          </button>
-                          <button
-                            onClick={() => handleDelete(product.id)}
-                            className="text-red-600 dark:text-red-400 hover:text-red-900 dark:hover:text-red-300"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
+                          {filter === 'deleted' ? (
+                            <button
+                              onClick={() => handleRestore(product.id)}
+                              className="text-emerald-600 dark:text-emerald-400 hover:text-emerald-900 dark:hover:text-emerald-300 text-xs font-medium"
+                            >
+                              Restore
+                            </button>
+                          ) : (
+                            <>
+                              <button
+                                onClick={() => navigate(`/inventory/${product.id}/edit`)}
+                                className="text-emerald-600 dark:text-emerald-400 hover:text-emerald-900 dark:hover:text-emerald-300"
+                              >
+                                <Edit className="h-4 w-4" />
+                              </button>
+                              <button
+                                onClick={() => handleDelete(product.id)}
+                                className="text-red-600 dark:text-red-400 hover:text-red-900 dark:hover:text-red-300"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </>
+                          )}
                         </div>
                       </td>
                     </tr>

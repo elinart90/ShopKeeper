@@ -23,6 +23,7 @@ router.get('/products/:id', (req, res, next) => controller.getProduct(req, res, 
 router.patch('/products/:id', requirePermission('inventory.update'), (req, res, next) => controller.updateProduct(req, res, next));
 router.post('/products/:id/receive-stock', requirePermission('inventory.receive_stock'), (req, res, next) => controller.receiveStock(req, res, next));
 router.delete('/products/:id', requirePermission('inventory.delete'), (req, res, next) => controller.deleteProduct(req, res, next));
+router.post('/products/:id/restore', requirePermission('inventory.update'), (req, res, next) => controller.restoreProduct(req, res, next));
 router.get('/products/:id/history', (req, res, next) => controller.getStockHistory(req, res, next));
 
 // Categories
