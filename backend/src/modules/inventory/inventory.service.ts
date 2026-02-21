@@ -1,8 +1,315 @@
 import { supabase } from '../../config/supabase';
+import { env } from '../../config/env';
 import { productSchema, productUpdateSchema } from '../../domain/validators';
 import { logger } from '../../utils/logger';
 
 export class InventoryService {
+  private normalizeSearchText(value: string): string {
+    return String(value || '')
+      .toLowerCase()
+      .replace(/ɛ/g, 'e')
+      .replace(/ɔ/g, 'o')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .trim();
+  }
+
+  private sanitizeSearchTerm(value: string): string {
+    return String(value || '')
+      // Remove punctuation/symbols from voice transcripts (e.g. "drilling machine.")
+      .replace(/[^\p{L}\p{N}\s-]/gu, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  private expandSearchTermsForTwi(rawSearch: string): string[] {
+    const raw = String(rawSearch || '').trim();
+    const normalized = this.normalizeSearchText(raw);
+    const terms = new Set<string>();
+    if (raw) terms.add(this.sanitizeSearchTerm(raw));
+    if (normalized) terms.add(this.sanitizeSearchTerm(normalized));
+
+    // Twi <-> English mapping for common retail words.
+    const synonymGroups = [
+      ['asikyire', 'sugar'],
+      ['emo', 'rice'],
+      ['nkyene', 'salt'],
+      ['ngo', 'oil'],
+      ['samina', 'soap'],
+      ['paanoo', 'bread'],
+      ['kosua', 'egg'],
+      ['nam', 'fish', 'meat'],
+      ['nsuo', 'water'],
+      ['nufuo', 'milk'],
+      ['tomato', 'tomato paste', 'tomato mix'],
+      ['borode', 'plantain'],
+      ['banku', 'cassava dough'],
+      ['fufu', 'cassava', 'plantain'],
+      ['biscuit', 'bisket'],
+    ] as const;
+
+    const normalizedTokens = normalized.split(/\s+/).filter(Boolean);
+    synonymGroups.forEach((group) => {
+      const normalizedGroup = group.map((item) => this.normalizeSearchText(item));
+      const shouldExpand = normalizedGroup.some((g) =>
+        normalized === g ||
+        normalized.includes(g) ||
+        normalizedTokens.includes(g)
+      );
+      if (!shouldExpand) return;
+      normalizedGroup.forEach((item) => terms.add(this.sanitizeSearchTerm(item)));
+    });
+
+    return Array.from(terms)
+      .map((t) => t.trim())
+      .filter(Boolean)
+      .slice(0, 8);
+  }
+
+  private parseAiJson(content: string): any {
+    const raw = String(content || '').trim();
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw);
+    } catch {
+      const start = raw.indexOf('{');
+      const end = raw.lastIndexOf('}');
+      if (start >= 0 && end > start) {
+        const sliced = raw.slice(start, end + 1);
+        try {
+          return JSON.parse(sliced);
+        } catch {
+          return null;
+        }
+      }
+      return null;
+    }
+  }
+
+  private normalizeUnit(unit: string | undefined): 'piece' | 'kg' | 'liter' | 'box' | 'pack' | null {
+    const value = String(unit || '').trim().toLowerCase();
+    if (!value) return null;
+    if (['piece', 'pcs', 'pc', 'unit'].includes(value)) return 'piece';
+    if (['kg', 'kilogram', 'kilo'].includes(value)) return 'kg';
+    if (['liter', 'litre', 'ltr', 'l'].includes(value)) return 'liter';
+    if (['box'].includes(value)) return 'box';
+    if (['pack', 'pkt'].includes(value)) return 'pack';
+    return null;
+  }
+
+  private buildAiPrompt(categoryNames: string[]) {
+    return `
+Extract product onboarding details from this product photo.
+Return STRICT JSON only with this shape:
+{
+  "name": string | null,
+  "barcode": string | null,
+  "unit": "piece" | "kg" | "liter" | "box" | "pack" | null,
+  "category_name": string | null,
+  "cost_price_hint": number | null,
+  "selling_price_hint": number | null,
+  "description_hint": string | null,
+  "confidence": {
+    "name": "high" | "medium" | "low",
+    "barcode": "high" | "medium" | "low",
+    "unit": "high" | "medium" | "low",
+    "category_name": "high" | "medium" | "low",
+    "cost_price_hint": "high" | "medium" | "low",
+    "selling_price_hint": "high" | "medium" | "low"
+  },
+  "notes": string[]
+}
+
+Important rules:
+- Barcode must be plain digits/letters only (remove spaces and non-essential symbols).
+- If barcode unclear, return null.
+- Use one of these categories if relevant: ${categoryNames.join(', ') || 'General'}
+- If no price is visible, keep price hints null.
+- Keep notes short and useful.
+`;
+  }
+
+  private async callOpenAiVision(imageDataUrl: string, prompt: string, hints?: { name?: string; barcode?: string }) {
+    if (!env.openaiApiKey) throw new Error('OPENAI_API_KEY not configured');
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${env.openaiApiKey}`,
+      },
+      body: JSON.stringify({
+        model: env.openaiModel || 'gpt-4o-mini',
+        temperature: 0.1,
+        messages: [
+          {
+            role: 'system',
+            content: 'You are a strict JSON extraction engine for retail product onboarding.',
+          },
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: prompt },
+              { type: 'text', text: `Hints: name=${hints?.name || ''}, barcode=${hints?.barcode || ''}` },
+              { type: 'image_url', image_url: { url: imageDataUrl } },
+            ],
+          },
+        ],
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => '');
+      throw new Error(`OpenAI request failed (${response.status}): ${errorText.slice(0, 300)}`);
+    }
+
+    const data: any = await response.json();
+    return String(data?.choices?.[0]?.message?.content || '');
+  }
+
+  private async callClaudeVision(imageDataUrl: string, prompt: string, hints?: { name?: string; barcode?: string }) {
+    if (!env.claudeApiKey) throw new Error('CLAUDE_API_KEY not configured');
+    const match = imageDataUrl.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+    if (!match) throw new Error('Invalid image data URL for Claude');
+    const mediaType = match[1];
+    const base64Data = match[2];
+
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': env.claudeApiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: env.claudeModel || 'claude-3-5-sonnet-latest',
+        max_tokens: 700,
+        temperature: 0,
+        system: 'You are a strict JSON extraction engine for retail product onboarding.',
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: `${prompt}\nHints: name=${hints?.name || ''}, barcode=${hints?.barcode || ''}` },
+              {
+                type: 'image',
+                source: {
+                  type: 'base64',
+                  media_type: mediaType,
+                  data: base64Data,
+                },
+              },
+            ],
+          },
+        ],
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => '');
+      throw new Error(`Claude request failed (${response.status}): ${errorText.slice(0, 300)}`);
+    }
+
+    const data: any = await response.json();
+    const textBlock = Array.isArray(data?.content)
+      ? data.content.find((block: any) => block?.type === 'text')
+      : null;
+    return String(textBlock?.text || '');
+  }
+
+  async aiOnboardFromImage(
+    shopId: string,
+    _userId: string,
+    payload: { imageDataUrl: string; hints?: { name?: string; barcode?: string } }
+  ) {
+    const imageDataUrl = String(payload?.imageDataUrl || '').trim();
+    if (!imageDataUrl.startsWith('data:image/')) {
+      throw new Error('A valid product image is required');
+    }
+    if (!env.openaiApiKey && !env.claudeApiKey) {
+      throw new Error('Neither OPENAI_API_KEY nor CLAUDE_API_KEY is configured on backend');
+    }
+
+    const categories = await this.getCategories(shopId);
+    const categoryNames = (categories || []).map((c: any) => String(c.name || '').trim()).filter(Boolean);
+    const prompt = this.buildAiPrompt(categoryNames);
+
+    let content = '';
+    let providerUsed = '';
+    const errors: string[] = [];
+
+    if (env.openaiApiKey) {
+      try {
+        content = await this.callOpenAiVision(imageDataUrl, prompt, payload?.hints);
+        providerUsed = 'openai';
+      } catch (err: any) {
+        const message = String(err?.message || 'OpenAI failed');
+        errors.push(message);
+        logger.warn('AI onboarding OpenAI failed; trying Claude fallback', { message });
+      }
+    }
+
+    if (!content && env.claudeApiKey) {
+      try {
+        content = await this.callClaudeVision(imageDataUrl, prompt, payload?.hints);
+        providerUsed = 'claude';
+      } catch (err: any) {
+        const message = String(err?.message || 'Claude failed');
+        errors.push(message);
+        logger.error('AI onboarding Claude fallback failed', { message });
+      }
+    }
+
+    if (!content) {
+      throw new Error(`Failed to process product image with AI. ${errors.join(' | ')}`);
+    }
+
+    const parsed = this.parseAiJson(content) || {};
+    const suggestedName = String(parsed?.name || '').trim() || null;
+    const suggestedBarcodeRaw = String(parsed?.barcode || '').trim();
+    const suggestedBarcode = suggestedBarcodeRaw
+      ? suggestedBarcodeRaw.replace(/[^0-9A-Za-z]/g, '')
+      : null;
+    const suggestedUnit = this.normalizeUnit(parsed?.unit);
+    const categoryName = String(parsed?.category_name || '').trim() || null;
+    const costPriceHint = Number(parsed?.cost_price_hint);
+    const sellingPriceHint = Number(parsed?.selling_price_hint);
+    const descriptionHint = String(parsed?.description_hint || '').trim() || null;
+
+    const duplicateCheck = await this.checkDuplicate(
+      shopId,
+      suggestedBarcode || undefined,
+      suggestedName || undefined
+    );
+    const recommendedAction =
+      duplicateCheck?.existingByBarcode || (duplicateCheck?.possibleByName || []).length > 0
+        ? 'update_existing'
+        : 'create_new';
+
+    return {
+      provider: providerUsed,
+      suggested: {
+        name: suggestedName,
+        barcode: suggestedBarcode,
+        unit: suggestedUnit,
+        category_name: categoryName,
+        cost_price_hint: Number.isFinite(costPriceHint) ? Number(costPriceHint) : null,
+        selling_price_hint: Number.isFinite(sellingPriceHint) ? Number(sellingPriceHint) : null,
+        description_hint: descriptionHint,
+      },
+      confidence: {
+        name: String(parsed?.confidence?.name || 'medium'),
+        barcode: String(parsed?.confidence?.barcode || 'low'),
+        unit: String(parsed?.confidence?.unit || 'low'),
+        category_name: String(parsed?.confidence?.category_name || 'low'),
+        cost_price_hint: String(parsed?.confidence?.cost_price_hint || 'low'),
+        selling_price_hint: String(parsed?.confidence?.selling_price_hint || 'low'),
+      },
+      notes: Array.isArray(parsed?.notes) ? parsed.notes.map((n: any) => String(n)) : [],
+      duplicateCheck,
+      recommendedAction,
+    };
+  }
+
   async createProduct(shopId: string, userId: string, data: any) {
     const validated = productSchema.parse(data);
     const normalizedBarcode = String(validated.barcode || '').trim();
@@ -123,27 +430,58 @@ export class InventoryService {
     search?: string;
     low_stock?: boolean;
     is_active?: boolean;
+    search_mode?: 'default' | 'english_first';
   }) {
     const includeActiveOnly = filters?.is_active === undefined ? true : filters.is_active;
-    let query = supabase
-      .from('products')
-      .select('*, category:categories(*)')
-      .eq('shop_id', shopId)
-      .order('created_at', { ascending: false });
+    const runQuery = async (terms?: string[]) => {
+      let query = supabase
+        .from('products')
+        .select('*, category:categories(*)')
+        .eq('shop_id', shopId)
+        .order('created_at', { ascending: false });
 
-    if (filters?.category_id) query = query.eq('category_id', filters.category_id);
-    query = query.eq('is_active', includeActiveOnly);
-    if (filters?.search) {
-      query = query.or(
-        `name.ilike.%${filters.search}%,barcode.ilike.%${filters.search}%,sku.ilike.%${filters.search}%`
+      if (filters?.category_id) query = query.eq('category_id', filters.category_id);
+      query = query.eq('is_active', includeActiveOnly);
+
+      const validTerms = (terms || []).map((t) => this.sanitizeSearchTerm(t)).filter(Boolean);
+      if (validTerms.length) {
+        const orQuery = validTerms
+          .flatMap((term) => [
+            `name.ilike.%${term}%`,
+            `barcode.ilike.%${term}%`,
+            `sku.ilike.%${term}%`,
+          ])
+          .join(',');
+        if (orQuery) query = query.or(orQuery);
+      }
+
+      const { data, error } = await query;
+      if (error) {
+        logger.error('Error fetching products:', error);
+        throw new Error('Failed to fetch products');
+      }
+      return data || [];
+    };
+
+    let list: any[] = [];
+    const rawSearch = String(filters?.search || '').trim();
+    if (!rawSearch) {
+      list = await runQuery();
+    } else if (filters?.search_mode === 'english_first') {
+      const englishTerms = Array.from(
+        new Set([
+          this.sanitizeSearchTerm(rawSearch),
+          this.sanitizeSearchTerm(this.normalizeSearchText(rawSearch)),
+        ].filter(Boolean))
       );
-    }
-
-    const { data: list, error } = await query;
-
-    if (error) {
-      logger.error('Error fetching products:', error);
-      throw new Error('Failed to fetch products');
+      list = englishTerms.length ? await runQuery(englishTerms) : [];
+      if (!list.length) {
+        const expandedTerms = this.expandSearchTermsForTwi(rawSearch);
+        list = expandedTerms.length ? await runQuery(expandedTerms) : [];
+      }
+    } else {
+      const expandedTerms = this.expandSearchTermsForTwi(rawSearch);
+      list = expandedTerms.length ? await runQuery(expandedTerms) : [];
     }
 
     let result = (list || []).map((p: any) => ({

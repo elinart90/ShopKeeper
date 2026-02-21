@@ -78,6 +78,34 @@ class InventoryController {
             (0, errorHandler_1.errorHandler)(error, req, res, next);
         }
     }
+    async aiOnboardFromImage(req, res, next) {
+        try {
+            if (!req.shopId || !req.userId) {
+                throw new errorHandler_1.AppError('Shop ID and User ID are required', 400);
+            }
+            const imageDataUrl = String(req.body?.imageDataUrl || '').trim();
+            if (!imageDataUrl)
+                throw new errorHandler_1.AppError('imageDataUrl is required', 400);
+            const data = await inventoryService.aiOnboardFromImage(req.shopId, req.userId, {
+                imageDataUrl,
+                hints: {
+                    name: typeof req.body?.hints?.name === 'string' ? req.body.hints.name : undefined,
+                    barcode: typeof req.body?.hints?.barcode === 'string' ? req.body.hints.barcode : undefined,
+                },
+            });
+            await (0, audit_1.logAuditAction)({
+                shopId: req.shopId,
+                userId: req.userId,
+                action: 'inventory.ai_onboarding',
+                entityType: 'product',
+                metadata: { source: 'image' },
+            });
+            res.json({ success: true, data });
+        }
+        catch (error) {
+            (0, errorHandler_1.errorHandler)(error, req, res, next);
+        }
+    }
     async receiveStock(req, res, next) {
         try {
             if (!req.shopId || !req.userId)
@@ -143,6 +171,27 @@ class InventoryController {
                 entityId: id,
             });
             res.json({ success: true, message: 'Product deleted' });
+        }
+        catch (error) {
+            (0, errorHandler_1.errorHandler)(error, req, res, next);
+        }
+    }
+    async restoreProduct(req, res, next) {
+        try {
+            if (!req.shopId || !req.userId) {
+                throw new errorHandler_1.AppError('Shop ID and User ID are required', 400);
+            }
+            const id = (0, params_1.getParam)(req, 'id');
+            const product = await inventoryService.restoreProduct(id, req.shopId);
+            await (0, audit_1.logAuditAction)({
+                shopId: req.shopId,
+                userId: req.userId,
+                action: 'inventory.restore',
+                entityType: 'product',
+                entityId: id,
+                after: product,
+            });
+            res.json({ success: true, data: product });
         }
         catch (error) {
             (0, errorHandler_1.errorHandler)(error, req, res, next);

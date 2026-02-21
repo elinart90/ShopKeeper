@@ -72,6 +72,87 @@ class ReportsController {
             (0, errorHandler_1.errorHandler)(error, req, res, next);
         }
     }
+    async getNaturalLanguageReport(req, res, next) {
+        try {
+            if (!req.shopId || !req.userId)
+                throw new errorHandler_1.AppError('Shop ID and User ID are required', 400);
+            const query = String(req.body?.query || '').trim();
+            if (!query)
+                throw new errorHandler_1.AppError('query is required', 400);
+            const language = String(req.body?.language || '').trim().toLowerCase();
+            const data = await reportsService.getNaturalLanguageReport(req.shopId, req.userId, query, language === 'auto' ? 'auto' : language === 'twi' ? 'twi' : 'en');
+            res.json({ success: true, data });
+        }
+        catch (error) {
+            (0, errorHandler_1.errorHandler)(error, req, res, next);
+        }
+    }
+    async getBusinessIntelligence(req, res, next) {
+        try {
+            if (!req.shopId || !req.userId)
+                throw new errorHandler_1.AppError('Shop ID and User ID are required', 400);
+            const period = String(req.query.period || 'daily').toLowerCase();
+            if (!['daily', 'weekly', 'monthly'].includes(period)) {
+                throw new errorHandler_1.AppError('Invalid period. Use daily, weekly, or monthly', 400);
+            }
+            const data = await reportsService.getBusinessIntelligence(req.shopId, req.userId, period);
+            res.json({ success: true, data });
+        }
+        catch (error) {
+            (0, errorHandler_1.errorHandler)(error, req, res, next);
+        }
+    }
+    async queryBusinessIntelligence(req, res, next) {
+        try {
+            if (!req.shopId || !req.userId)
+                throw new errorHandler_1.AppError('Shop ID and User ID are required', 400);
+            const query = String(req.body?.query || '').trim();
+            if (!query)
+                throw new errorHandler_1.AppError('query is required', 400);
+            const period = String(req.body?.period || 'daily').toLowerCase();
+            if (!['daily', 'weekly', 'monthly'].includes(period)) {
+                throw new errorHandler_1.AppError('Invalid period. Use daily, weekly, or monthly', 400);
+            }
+            const data = await reportsService.queryBusinessIntelligence(req.shopId, req.userId, query, period);
+            res.json({ success: true, data });
+        }
+        catch (error) {
+            (0, errorHandler_1.errorHandler)(error, req, res, next);
+        }
+    }
+    async getInventoryStockIntelligence(req, res, next) {
+        try {
+            if (!req.shopId || !req.userId)
+                throw new errorHandler_1.AppError('Shop ID and User ID are required', 400);
+            const period = String(req.query.period || 'weekly').toLowerCase();
+            if (!['daily', 'weekly', 'monthly'].includes(period)) {
+                throw new errorHandler_1.AppError('Invalid period. Use daily, weekly, or monthly', 400);
+            }
+            const data = await reportsService.getInventoryStockIntelligence(req.shopId, req.userId, period);
+            res.json({ success: true, data });
+        }
+        catch (error) {
+            (0, errorHandler_1.errorHandler)(error, req, res, next);
+        }
+    }
+    async queryInventoryStockIntelligence(req, res, next) {
+        try {
+            if (!req.shopId || !req.userId)
+                throw new errorHandler_1.AppError('Shop ID and User ID are required', 400);
+            const query = String(req.body?.query || '').trim();
+            if (!query)
+                throw new errorHandler_1.AppError('query is required', 400);
+            const period = String(req.body?.period || 'weekly').toLowerCase();
+            if (!['daily', 'weekly', 'monthly'].includes(period)) {
+                throw new errorHandler_1.AppError('Invalid period. Use daily, weekly, or monthly', 400);
+            }
+            const data = await reportsService.queryInventoryStockIntelligence(req.shopId, req.userId, query, period);
+            res.json({ success: true, data });
+        }
+        catch (error) {
+            (0, errorHandler_1.errorHandler)(error, req, res, next);
+        }
+    }
 }
 exports.ReportsController = ReportsController;
 //# sourceMappingURL=reports.controller.js.map

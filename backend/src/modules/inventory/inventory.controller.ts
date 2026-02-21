@@ -83,6 +83,33 @@ export class InventoryController {
     }
   }
 
+  async aiOnboardFromImage(req: ShopRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.shopId || !req.userId) {
+        throw new AppError('Shop ID and User ID are required', 400);
+      }
+      const imageDataUrl = String(req.body?.imageDataUrl || '').trim();
+      if (!imageDataUrl) throw new AppError('imageDataUrl is required', 400);
+      const data = await inventoryService.aiOnboardFromImage(req.shopId, req.userId, {
+        imageDataUrl,
+        hints: {
+          name: typeof req.body?.hints?.name === 'string' ? req.body.hints.name : undefined,
+          barcode: typeof req.body?.hints?.barcode === 'string' ? req.body.hints.barcode : undefined,
+        },
+      });
+      await logAuditAction({
+        shopId: req.shopId,
+        userId: req.userId,
+        action: 'inventory.ai_onboarding',
+        entityType: 'product',
+        metadata: { source: 'image' },
+      });
+      res.json({ success: true, data });
+    } catch (error) {
+      errorHandler(error as AppError, req, res, next);
+    }
+  }
+
   async receiveStock(req: ShopRequest, res: Response, next: NextFunction) {
     try {
       if (!req.shopId || !req.userId) throw new AppError('Shop ID and User ID required', 400);

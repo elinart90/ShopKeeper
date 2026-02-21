@@ -27,12 +27,20 @@ import {
   Sun,
   Moon,
   Monitor,
+  Mic,
 } from "lucide-react";
 import { useShop } from "../../../contexts/useShop";
 import { useAuth } from "../../../contexts/useAuth";
 import { useTheme } from "../../../contexts/ThemeContext";
 import { reportsApi, walletsApi, dailyCloseApi, shopsApi, salesApi, authApi, clearShopId, controlsApi } from "../../../lib/api";
-import type { ComplianceExportData } from "../../../lib/api";
+import type {
+  BusinessIntelligenceData,
+  BusinessIntelligenceQueryData,
+  ComplianceExportData,
+  InventoryStockIntelligenceData,
+  InventoryStockIntelligenceQueryData,
+  PurchasePlanDraft,
+} from "../../../lib/api";
 import toast from "react-hot-toast";
 import CreditTab from "../components/CreditTab";
 
@@ -51,6 +59,27 @@ const TABS = [
 type TabId = (typeof TABS)[number]["id"];
 
 const OWNER_ONLY_TAB_IDS: TabId[] = ["money-flow", "inventory-finance", "staff", "reports"];
+
+type SpeechRecognitionLike = {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onresult: ((event: SpeechRecognitionResultEventLike) => void) | null;
+  onerror: ((event: Event) => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+};
+
+type SpeechRecognitionCtor = new () => SpeechRecognitionLike;
+
+type SpeechRecognitionResultEventLike = {
+  resultIndex: number;
+  results: ArrayLike<{
+    isFinal: boolean;
+    [index: number]: { transcript: string };
+  }>;
+};
 
 function getVisibleTabs(role?: string) {
   const isOwner = role === "owner";
@@ -373,7 +402,7 @@ export default function Home() {
     );
   }
 
-  const currency = currentShop.currency || "USD";
+  const currency = currentShop.currency || "GHS";
   const visibleTabs = getVisibleTabs(currentShop?.role);
 
   const handleTabSelect = (id: TabId) => {
@@ -1296,26 +1325,79 @@ function InventoryFinanceTab({
   onNavigate: (path: string) => void;
 }) {
   const [data, setData] = useState<any>(null);
+  const [stockIntel, setStockIntel] = useState<InventoryStockIntelligenceData | null>(null);
+  const [stockPeriod, setStockPeriod] = useState<"daily" | "weekly" | "monthly">("weekly");
+  const [stockQuery, setStockQuery] = useState("");
+  const [stockQueryLoading, setStockQueryLoading] = useState(false);
+  const [stockQueryResult, setStockQueryResult] = useState<InventoryStockIntelligenceQueryData | null>(null);
+  const [planCreating, setPlanCreating] = useState(false);
+  const [purchasePlan, setPurchasePlan] = useState<PurchasePlanDraft | null>(null);
   const [loading, setLoading] = useState(true);
   const [deadStockDays, setDeadStockDays] = useState(30);
 
   const load = async () => {
     setLoading(true);
     try {
-      const res = await reportsApi.getInventoryFinance({ days: deadStockDays });
-      setData(res.data.data);
+      const [financeRes, stockIntelRes] = await Promise.all([
+        reportsApi.getInventoryFinance({ days: deadStockDays }),
+        reportsApi.getInventoryStockIntelligence({ period: stockPeriod }),
+      ]);
+      setData(financeRes.data.data);
+      setStockIntel(stockIntelRes.data.data);
     } catch (e: any) {
       const msg = e?.response?.data?.error?.message || e?.message || "Failed to load";
       toast.error(msg);
       setData(null);
+      setStockIntel(null);
     } finally {
       setLoading(false);
     }
   };
 
+  const askStockIntel = async () => {
+    if (!stockQuery.trim()) return;
+    setStockQueryLoading(true);
+    try {
+      const res = await reportsApi.queryInventoryStockIntelligence({
+        query: stockQuery.trim(),
+        period: stockPeriod,
+      });
+      setStockQueryResult(res.data.data);
+    } catch (e: any) {
+      const msg = e?.response?.data?.error?.message || e?.message || "Failed to run stock query";
+      toast.error(msg);
+    } finally {
+      setStockQueryLoading(false);
+    }
+  };
+
+  const createPurchasePlan = async () => {
+    setPlanCreating(true);
+    try {
+      const res = await controlsApi.createReorderPurchasePlan({
+        period: stockPeriod,
+        maxItems: 15,
+        supplierStrategy: "last_supplier",
+      });
+      const payload = res.data.data;
+      if (!payload?.created || !payload.plan) {
+        toast(payload?.message || "No purchase plan created");
+        setPurchasePlan(null);
+        return;
+      }
+      setPurchasePlan(payload.plan);
+      toast.success("Purchase plan draft created");
+    } catch (e: any) {
+      const msg = e?.response?.data?.error?.message || e?.message || "Failed to create purchase plan";
+      toast.error(msg);
+    } finally {
+      setPlanCreating(false);
+    }
+  };
+
   useEffect(() => {
     load();
-  }, [deadStockDays]);
+  }, [deadStockDays, stockPeriod]);
 
   const fmt = (n: number) => `${currency} ${Number(n).toFixed(2)}`;
 
@@ -1380,6 +1462,148 @@ function InventoryFinanceTab({
               <p className="text-xl font-bold text-gray-900 dark:text-white">{data.productCount}</p>
             </div>
           </div>
+
+          {stockIntel && (
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-4 space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Inventory & Stock Intelligence</h3>
+                <div className="flex items-center gap-2">
+                  <select
+                    value={stockPeriod}
+                    onChange={(e) => setStockPeriod(e.target.value as "daily" | "weekly" | "monthly")}
+                    className="rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-2 py-1 text-sm"
+                  >
+                    <option value="daily">Daily</option>
+                    <option value="weekly">Weekly</option>
+                    <option value="monthly">Monthly</option>
+                  </select>
+                  <span className="text-xs text-gray-500">Provider: {stockIntel.providerUsed}</span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="rounded-lg bg-gray-50 dark:bg-gray-700/40 p-3">
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Stock health score</p>
+                  <p className="text-xl font-bold text-gray-900 dark:text-white">
+                    {stockIntel.kpiHealthScore.score}/100
+                  </p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 capitalize">{stockIntel.kpiHealthScore.status}</p>
+                </div>
+                <div className="rounded-lg bg-gray-50 dark:bg-gray-700/40 p-3">
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Stockout risk items</p>
+                  <p className="text-xl font-bold text-gray-900 dark:text-white">{stockIntel.stockoutRisk.length}</p>
+                </div>
+                <div className="rounded-lg bg-gray-50 dark:bg-gray-700/40 p-3">
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Dead stock alerts</p>
+                  <p className="text-xl font-bold text-gray-900 dark:text-white">{stockIntel.deadStockAlerts.length}</p>
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-3">
+                <p className="text-sm font-medium text-gray-900 dark:text-white">{stockIntel.summary || "No summary available."}</p>
+                {stockIntel.trendNarrative && (
+                  <p className="text-sm mt-2 text-gray-700 dark:text-gray-300">{stockIntel.trendNarrative}</p>
+                )}
+                {stockIntel.priorityAction && (
+                  <p className="text-sm mt-2 text-emerald-700 dark:text-emerald-300">Action: {stockIntel.priorityAction}</p>
+                )}
+              </div>
+
+              {stockIntel.reorderSuggestions.length > 0 && (
+                <div className="overflow-x-auto">
+                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm font-medium text-gray-900 dark:text-white">Top reorder suggestions</p>
+                    <button
+                      onClick={createPurchasePlan}
+                      disabled={planCreating}
+                      className="px-3 py-1.5 rounded-lg btn-primary-gradient text-sm disabled:opacity-60"
+                    >
+                      {planCreating ? "Creating..." : "Create purchase plan"}
+                    </button>
+                  </div>
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-left text-gray-500 dark:text-gray-400 border-b">
+                        <th className="pb-2">Product</th>
+                        <th className="pb-2">Risk</th>
+                        <th className="pb-2">Cover (days)</th>
+                        <th className="pb-2">Reorder qty</th>
+                        <th className="pb-2">Est. cost</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {stockIntel.reorderSuggestions.slice(0, 8).map((item) => (
+                        <tr key={item.productId} className="border-b border-gray-100 dark:border-gray-700">
+                          <td className="py-2">{item.name}</td>
+                          <td className="py-2 capitalize">{item.riskLevel}</td>
+                          <td className="py-2">{item.daysOfCover}</td>
+                          <td className="py-2">{item.reorderQty}</td>
+                          <td className="py-2">{fmt(item.estimatedReorderCost)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {purchasePlan && (
+                <div className="rounded-lg border border-emerald-200 dark:border-emerald-800 bg-emerald-50/60 dark:bg-emerald-900/20 p-3 space-y-2">
+                  <p className="text-sm font-semibold text-emerald-900 dark:text-emerald-300">
+                    Supplier-ready purchase draft created
+                  </p>
+                  <p className="text-xs text-emerald-900/80 dark:text-emerald-300/90">
+                    Plan {purchasePlan.id.slice(0, 8)} • {purchasePlan.total_items} items • {fmt(purchasePlan.total_estimated_cost)}
+                  </p>
+                  {purchasePlan.supplierGroups.length > 0 && (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="text-left text-emerald-800 dark:text-emerald-300 border-b border-emerald-200/70 dark:border-emerald-800">
+                            <th className="pb-1">Supplier</th>
+                            <th className="pb-1">Items</th>
+                            <th className="pb-1">Estimated cost</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {purchasePlan.supplierGroups.map((g) => (
+                            <tr key={g.supplierName} className="border-b border-emerald-100/70 dark:border-emerald-900/40">
+                              <td className="py-1">{g.supplierName}</td>
+                              <td className="py-1">{g.items}</td>
+                              <td className="py-1">{fmt(g.estimatedCost)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-gray-900 dark:text-white">Ask Inventory AI</p>
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <input
+                    value={stockQuery}
+                    onChange={(e) => setStockQuery(e.target.value)}
+                    placeholder='e.g. Which products may stock out next week?'
+                    className="flex-1 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm"
+                  />
+                  <button
+                    onClick={askStockIntel}
+                    disabled={stockQueryLoading || !stockQuery.trim()}
+                    className="px-4 py-2 rounded-lg btn-primary-gradient disabled:opacity-60"
+                  >
+                    {stockQueryLoading ? "Asking..." : "Ask"}
+                  </button>
+                </div>
+                {stockQueryResult?.answer && (
+                  <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-3 text-sm whitespace-pre-wrap text-gray-800 dark:text-gray-200">
+                    {stockQueryResult.answer}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           {data.lowStock?.length > 0 && (
             <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-4">
@@ -2386,7 +2610,22 @@ function ReportsTab() {
   const [loading, setLoading] = useState(false);
   const [report, setReport] = useState<ComplianceExportData | null>(null);
   const [comparisonData, setComparisonData] = useState<any>(null);
+  const [nlQuery, setNlQuery] = useState("");
+  const [nlLanguage, setNlLanguage] = useState<"auto" | "en" | "twi">("auto");
+  const [nlLoading, setNlLoading] = useState(false);
+  const [nlResult, setNlResult] = useState<any>(null);
+  const [nlHistory, setNlHistory] = useState<Array<{ query: string; language: "auto" | "en" | "twi"; at: string }>>([]);
+  const [biPeriod, setBiPeriod] = useState<"daily" | "weekly" | "monthly">("daily");
+  const [biLoading, setBiLoading] = useState(false);
+  const [biData, setBiData] = useState<BusinessIntelligenceData | null>(null);
+  const [biQuery, setBiQuery] = useState("");
+  const [biQueryLoading, setBiQueryLoading] = useState(false);
+  const [biQueryResult, setBiQueryResult] = useState<BusinessIntelligenceQueryData | null>(null);
+  const [isListening, setIsListening] = useState(false);
+  const [speechSupported, setSpeechSupported] = useState(false);
   const printRef = useRef<HTMLDivElement>(null);
+  const speechRef = useRef<SpeechRecognitionLike | null>(null);
+  const historyKey = `nl_report_history_${currentShop?.id || "default"}`;
 
   const loadComparisonData = async () => {
     try {
@@ -2397,9 +2636,157 @@ function ReportsTab() {
     }
   };
 
+  const loadBusinessIntelligence = async (period: "daily" | "weekly" | "monthly") => {
+    setBiLoading(true);
+    try {
+      const res = await reportsApi.getBusinessIntelligence({ period });
+      setBiData(res.data?.data || null);
+    } catch (e: any) {
+      toast.error(e?.response?.data?.error?.message || "Failed to load business intelligence");
+      setBiData(null);
+    } finally {
+      setBiLoading(false);
+    }
+  };
+
   useEffect(() => {
     loadComparisonData();
   }, []);
+
+  useEffect(() => {
+    loadBusinessIntelligence(biPeriod);
+  }, [biPeriod]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const win = window as Window & {
+      SpeechRecognition?: SpeechRecognitionCtor;
+      webkitSpeechRecognition?: SpeechRecognitionCtor;
+    };
+    setSpeechSupported(Boolean(win.SpeechRecognition || win.webkitSpeechRecognition));
+    return () => {
+      try {
+        speechRef.current?.stop();
+      } catch {
+        // ignore cleanup errors
+      }
+      speechRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(historyKey);
+      const parsed = raw ? JSON.parse(raw) : [];
+      if (Array.isArray(parsed)) {
+        setNlHistory(parsed.slice(0, 10));
+      }
+    } catch {
+      setNlHistory([]);
+    }
+  }, [historyKey]);
+
+  const askNaturalLanguageReport = async () => {
+    const q = nlQuery.trim();
+    if (!q) {
+      toast.error("Enter a report question first");
+      return;
+    }
+    setNlLoading(true);
+    try {
+      const res = await reportsApi.getNaturalLanguageReport({ query: q, language: nlLanguage });
+      setNlResult(res.data?.data || null);
+      const item = { query: q, language: nlLanguage, at: new Date().toISOString() };
+      const nextHistory = [item, ...nlHistory.filter((h) => h.query !== q || h.language !== nlLanguage)].slice(0, 10);
+      setNlHistory(nextHistory);
+      localStorage.setItem(historyKey, JSON.stringify(nextHistory));
+    } catch (e: any) {
+      toast.error(e?.response?.data?.error?.message || "Failed to run natural language report");
+    } finally {
+      setNlLoading(false);
+    }
+  };
+
+  const askBusinessIntelligenceQuery = async () => {
+    const q = biQuery.trim();
+    if (!q) {
+      toast.error("Enter a BI question first");
+      return;
+    }
+    setBiQueryLoading(true);
+    try {
+      const res = await reportsApi.queryBusinessIntelligence({ query: q, period: biPeriod });
+      setBiQueryResult(res.data?.data || null);
+    } catch (e: any) {
+      toast.error(e?.response?.data?.error?.message || "Failed to answer BI query");
+      setBiQueryResult(null);
+    } finally {
+      setBiQueryLoading(false);
+    }
+  };
+
+  const toggleVoiceQuery = () => {
+    if (!speechSupported) {
+      toast.error("Voice input is not supported on this browser.");
+      return;
+    }
+
+    if (isListening) {
+      try {
+        speechRef.current?.stop();
+      } catch {
+        // ignore stop errors
+      }
+      setIsListening(false);
+      return;
+    }
+
+    const win = window as Window & {
+      SpeechRecognition?: SpeechRecognitionCtor;
+      webkitSpeechRecognition?: SpeechRecognitionCtor;
+    };
+    const Ctor = win.SpeechRecognition || win.webkitSpeechRecognition;
+    if (!Ctor) {
+      toast.error("Voice input is not available on this device.");
+      return;
+    }
+
+    const recognition = new Ctor();
+    speechRef.current = recognition;
+    recognition.continuous = false;
+    recognition.interimResults = true;
+    recognition.lang = nlLanguage === "twi" ? "en-GH" : "en-US";
+
+    const baseQuery = nlQuery.trim();
+    recognition.onresult = (event: SpeechRecognitionResultEventLike) => {
+      let finalText = "";
+      let interimText = "";
+      for (let i = event.resultIndex; i < event.results.length; i += 1) {
+        const transcript = String(event.results[i][0]?.transcript || "").trim();
+        if (event.results[i].isFinal) finalText += ` ${transcript}`;
+        else interimText += ` ${transcript}`;
+      }
+      const merged = `${finalText} ${interimText}`.trim();
+      if (!merged) return;
+      setNlQuery(`${baseQuery}${baseQuery ? " " : ""}${merged}`.trim());
+    };
+    recognition.onerror = () => {
+      setIsListening(false);
+      toast.error("Could not capture voice. Please try again.");
+    };
+    recognition.onend = () => {
+      setIsListening(false);
+      speechRef.current = null;
+    };
+
+    try {
+      recognition.start();
+      setIsListening(true);
+    } catch {
+      setIsListening(false);
+      toast.error("Failed to start microphone input.");
+    }
+  };
 
   const generateReport = async () => {
     setLoading(true);
@@ -2465,6 +2852,23 @@ function ReportsTab() {
   const revenueSeries = recent.map((d: any) => Number(d?.revenue || 0));
   const expenseSeries = recent.map((d: any) => Number(d?.expenses || 0));
   const profitSeries = recent.map((d: any) => Number(d?.profit || 0));
+  const biSnapshot = (biData?.snapshot || {}) as any;
+  const biComparison = biSnapshot?.comparison || {};
+  const biRevenueSeries = [
+    Number(biComparison?.revenuePrev || 0),
+    Number(biComparison?.revenueNow || 0),
+    Number((biData?.forecast?.next7Days?.revenue || 0) / 7),
+    Number((biData?.forecast?.next30Days?.revenue || 0) / 30),
+  ].filter((v) => Number.isFinite(v));
+  const biProfitSeries = [
+    Number(biComparison?.profitPrev || 0),
+    Number(biComparison?.profitNow || 0),
+    Number((biData?.forecast?.next7Days?.profit || 0) / 7),
+    Number((biData?.forecast?.next30Days?.profit || 0) / 30),
+  ].filter((v) => Number.isFinite(v));
+  const biPaymentSeries = (biData?.paymentMethodInsights?.mix || [])
+    .slice(0, 5)
+    .map((m) => Number(m?.amount || 0));
 
   const MetricCard = ({
     label,
@@ -2559,6 +2963,219 @@ function ReportsTab() {
       <p className="text-sm text-gray-600 dark:text-gray-400 mb-6">
         Export-ready: daily report (PDF), monthly summary, P&L, tax-ready. Download or email.
       </p>
+
+      <div className="mb-6 rounded-lg border border-blue-200 dark:border-blue-700 bg-blue-50/60 dark:bg-blue-900/20 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+          <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Business Intelligence</h3>
+          <div className="flex gap-2">
+            {(["daily", "weekly", "monthly"] as const).map((p) => (
+              <button
+                key={p}
+                type="button"
+                onClick={() => setBiPeriod(p)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium ${
+                  biPeriod === p
+                    ? "btn-primary-gradient"
+                    : "bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200"
+                }`}
+              >
+                {p}
+              </button>
+            ))}
+          </div>
+        </div>
+        {biLoading && <p className="text-sm text-gray-600 dark:text-gray-300">Loading BI insights...</p>}
+        {biData && (
+          <div className="space-y-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 p-3">
+                <p className="text-xs text-gray-500 dark:text-gray-400">KPI health score</p>
+                <p className="text-xl font-bold text-gray-900 dark:text-white">{biData.kpiHealthScore.score}/100</p>
+                <p className="text-xs text-gray-600 dark:text-gray-300">{biData.kpiHealthScore.status}</p>
+                <MiniSparkline values={biProfitSeries} className="mt-2" />
+              </div>
+              <div className="rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 p-3">
+                <p className="text-xs text-gray-500 dark:text-gray-400">Forecast</p>
+                <p className="text-sm text-gray-900 dark:text-white">
+                  7d: {currency} {Number(biData.forecast.next7Days.revenue || 0).toFixed(2)}
+                </p>
+                <p className="text-sm text-gray-900 dark:text-white">
+                  30d: {currency} {Number(biData.forecast.next30Days.revenue || 0).toFixed(2)}
+                </p>
+                <MiniSparkline values={biRevenueSeries} className="mt-2" />
+              </div>
+            </div>
+            <p className="text-sm text-gray-800 dark:text-gray-100">{biData.dailyWeeklyMonthlySummary}</p>
+            <p className="text-xs text-gray-600 dark:text-gray-300">Today vs yesterday: {biData.todayVsYesterdayExplanation}</p>
+            <p className="text-xs text-gray-600 dark:text-gray-300">Trend: {biData.trendDetection.aiNarrative}</p>
+            <p className="text-xs text-gray-600 dark:text-gray-300">Why profit down: {biData.whyProfitDown}</p>
+            <div className="rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 p-3">
+              <p className="text-xs font-semibold text-gray-700 dark:text-gray-200 mb-1">Payment method sparkline</p>
+              <MiniSparkline values={biPaymentSeries} />
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 p-3">
+                <p className="text-xs font-semibold text-gray-700 dark:text-gray-200 mb-1">Top-selling products</p>
+                <ul className="text-xs text-gray-600 dark:text-gray-300 space-y-1">
+                  {(biData.topSellingProducts || []).slice(0, 5).map((p) => (
+                    <li key={p.productId}>{p.name} - {p.quantitySold}</li>
+                  ))}
+                </ul>
+              </div>
+              <div className="rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 p-3">
+                <p className="text-xs font-semibold text-gray-700 dark:text-gray-200 mb-1">Low-performing products</p>
+                <ul className="text-xs text-gray-600 dark:text-gray-300 space-y-1">
+                  {(biData.lowPerformingProducts || []).slice(0, 5).map((p) => (
+                    <li key={p.productId}>{p.name} - {p.quantitySold}</li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+            <p className="text-xs text-gray-600 dark:text-gray-300">{biData.paymentMethodInsights?.narrative}</p>
+            <div className="space-y-2 pt-2 border-t border-gray-200 dark:border-gray-700">
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={biQuery}
+                  onChange={(e) => setBiQuery(e.target.value)}
+                  placeholder='Natural language dashboard query (e.g. "Why is profit down?")'
+                  className="flex-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm"
+                />
+                <button
+                  type="button"
+                  onClick={askBusinessIntelligenceQuery}
+                  disabled={biQueryLoading}
+                  className="px-4 py-2 rounded-lg btn-primary-gradient text-sm font-medium disabled:opacity-50"
+                >
+                  {biQueryLoading ? "Asking..." : "Ask BI"}
+                </button>
+              </div>
+              {biQueryResult && (
+                <div className="rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 p-3">
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Provider: {biQueryResult.providerUsed}</p>
+                  <div className="whitespace-pre-wrap text-sm text-gray-800 dark:text-gray-100">{biQueryResult.answer}</div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="mb-6 rounded-lg border border-emerald-200 dark:border-emerald-700 bg-emerald-50/60 dark:bg-emerald-900/20 p-4">
+        <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-2">Owner Copilot (Natural Language Reports)</h3>
+        <p className="text-xs text-gray-600 dark:text-gray-300 mb-3">
+          Ask in English or Twi. Gemini is used first (best Twi phrasing), then OpenAI fallback if Gemini fails.
+        </p>
+        <div className="space-y-3">
+          <textarea
+            value={nlQuery}
+            onChange={(e) => setNlQuery(e.target.value)}
+            rows={3}
+            placeholder="Example: Show me profit trend for this month and explain in Twi"
+            className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+          />
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={nlLanguage}
+              onChange={(e) => setNlLanguage(e.target.value as "auto" | "en" | "twi")}
+              className="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm"
+            >
+              <option value="auto">Auto detect</option>
+              <option value="en">English</option>
+              <option value="twi">Twi</option>
+            </select>
+            <button
+              type="button"
+              onClick={askNaturalLanguageReport}
+              disabled={nlLoading}
+              className="px-4 py-2 rounded-lg btn-primary-gradient font-medium disabled:opacity-50"
+            >
+              {nlLoading ? "Thinking..." : "Ask Copilot"}
+            </button>
+            <button
+              type="button"
+              onClick={toggleVoiceQuery}
+              disabled={!speechSupported}
+              className={`inline-flex items-center gap-2 px-3 py-2 rounded-lg border text-sm ${
+                isListening
+                  ? "border-red-300 bg-red-50 text-red-700 dark:border-red-700 dark:bg-red-900/20 dark:text-red-300"
+                  : "border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200"
+              } disabled:opacity-50`}
+            >
+              <Mic className="h-4 w-4" />
+              {isListening ? "Listening..." : "Voice query"}
+            </button>
+          </div>
+          {!speechSupported && (
+            <p className="text-xs text-amber-600 dark:text-amber-300">
+              Voice input is unavailable on this browser. Try Chrome/Edge on mobile or desktop.
+            </p>
+          )}
+        </div>
+
+        {nlHistory.length > 0 && (
+          <div className="mt-3">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs font-medium text-gray-600 dark:text-gray-300">Recent questions</p>
+              <button
+                type="button"
+                onClick={() => {
+                  setNlHistory([]);
+                  localStorage.removeItem(historyKey);
+                }}
+                className="text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+              >
+                Clear
+              </button>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {nlHistory.slice(0, 10).map((h, idx) => (
+                <button
+                  key={`${h.at}-${idx}`}
+                  type="button"
+                  onClick={() => {
+                    setNlQuery(h.query);
+                    setNlLanguage(h.language);
+                  }}
+                  className="px-2 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:border-emerald-400"
+                  title={new Date(h.at).toLocaleString()}
+                >
+                  {h.language.toUpperCase()} - {h.query.slice(0, 40)}{h.query.length > 40 ? "..." : ""}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {nlResult && (
+          <div className="mt-4 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 p-3">
+            <div className="flex flex-wrap gap-2 text-xs mb-2">
+              <span className="px-2 py-1 rounded bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200">
+                {String(nlResult?.periodLabel || "")}
+              </span>
+              <span className="px-2 py-1 rounded bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300">
+                provider: {String(nlResult?.providerUsed || "unknown")}
+              </span>
+              <span className="px-2 py-1 rounded bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300">
+                language: {String(nlResult?.language || "en")}
+              </span>
+            </div>
+            <div className="whitespace-pre-wrap text-sm text-gray-800 dark:text-gray-100">
+              {String(nlResult?.answer || "")}
+            </div>
+            {!!nlResult?.chartReferences?.title && (
+              <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-600">
+                <p className="text-xs font-semibold text-gray-700 dark:text-gray-200 mb-1">
+                  Chart/Data reference: {String(nlResult.chartReferences.title)}
+                </p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  Key: {String(nlResult?.chartReferences?.key || "")} | points: {Number(nlResult?.chartReferences?.points?.length || 0)}
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       <div className="space-y-4 mb-6">
         <div>

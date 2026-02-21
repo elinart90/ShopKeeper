@@ -3,8 +3,10 @@ import { getDefaultPermissionsForRole } from '../../middleware/requirePermission
 import { logAuditAction } from './audit';
 import { logger } from '../../utils/logger';
 import { InventoryService } from '../inventory/inventory.service';
+import { ReportsService } from '../reports/reports.service';
 
 const inventoryService = new InventoryService();
+const reportsService = new ReportsService();
 
 function isMissingControlsTables(error: any) {
   const code = String(error?.code || '');
@@ -26,7 +28,9 @@ function isMissingControlsTables(error: any) {
       message.includes('stock_locations') ||
       message.includes('stock_location_balances') ||
       message.includes('stock_transfers') ||
-      message.includes('supplier_deliveries')
+      message.includes('supplier_deliveries') ||
+      message.includes('purchase_plans') ||
+      message.includes('purchase_plan_items')
     )
   );
 }
@@ -1357,6 +1361,170 @@ export class ControlsService {
         shortDeliveries: g.shortDeliveries,
       };
     }).sort((a, b) => b.deliveryAccuracyPercent - a.deliveryAccuracyPercent);
+  }
+
+  async createReorderPurchasePlan(
+    shopId: string,
+    userId: string,
+    input?: {
+      period?: 'daily' | 'weekly' | 'monthly';
+      maxItems?: number;
+      supplierStrategy?: 'last_supplier' | 'best_scorecard';
+      notes?: string;
+    }
+  ) {
+    const period = (input?.period || 'weekly') as 'daily' | 'weekly' | 'monthly';
+    const maxItems = Math.max(1, Math.min(50, Number(input?.maxItems || 15)));
+    const supplierStrategy = input?.supplierStrategy || 'last_supplier';
+
+    const intelligence = await reportsService.getInventoryStockIntelligence(shopId, userId, period);
+    const suggestions = (intelligence?.reorderSuggestions || []).filter((x: any) => Number(x.reorderQty || 0) > 0).slice(0, maxItems);
+    if (!suggestions.length) {
+      return {
+        created: false,
+        message: 'No reorder suggestions available for selected period.',
+        plan: null,
+      };
+    }
+
+    const productIds = suggestions.map((s: any) => String(s.productId)).filter(Boolean);
+    const { data: products, error: productsErr } = await supabase
+      .from('products')
+      .select('id,name,cost_price')
+      .eq('shop_id', shopId)
+      .in('id', productIds);
+    if (productsErr) throw new Error('Failed to read products for purchase plan');
+    const productMap = new Map<string, any>((products || []).map((p: any) => [String(p.id), p]));
+
+    const { data: deliveries, error: deliveriesErr } = await supabase
+      .from('supplier_deliveries')
+      .select('product_id,supplier_name,unit_cost,created_at')
+      .eq('shop_id', shopId)
+      .in('product_id', productIds)
+      .order('created_at', { ascending: false })
+      .limit(2000);
+    if (deliveriesErr && !isMissingControlsTables(deliveriesErr)) {
+      throw new Error('Failed to read supplier delivery history');
+    }
+
+    const latestSupplierByProduct = new Map<string, { supplierName: string; unitCost: number }>();
+    for (const row of deliveries || []) {
+      const pid = String((row as any).product_id || '');
+      if (!pid || latestSupplierByProduct.has(pid)) continue;
+      latestSupplierByProduct.set(pid, {
+        supplierName: String((row as any).supplier_name || '').trim(),
+        unitCost: Number((row as any).unit_cost || 0),
+      });
+    }
+
+    const scorecard = await this.getSupplierScorecard(shopId);
+    const bestSupplierName = scorecard[0]?.supplierName ? String(scorecard[0].supplierName) : '';
+
+    const draftItems = suggestions.map((s: any) => {
+      const pid = String(s.productId);
+      const product = productMap.get(pid);
+      const latestSupplier = latestSupplierByProduct.get(pid);
+      const supplierName = supplierStrategy === 'best_scorecard'
+        ? (latestSupplier?.supplierName || bestSupplierName || 'Unassigned supplier')
+        : (latestSupplier?.supplierName || bestSupplierName || 'Unassigned supplier');
+      const unitCost = Number(
+        latestSupplier?.unitCost && latestSupplier.unitCost > 0
+          ? latestSupplier.unitCost
+          : Number(product?.cost_price || 0)
+      );
+      const qty = Number(s.reorderQty || 0);
+      const estimatedCost = Number((qty * unitCost).toFixed(2));
+      return {
+        productId: pid,
+        productName: String(product?.name || s.name || 'Unknown'),
+        supplierName,
+        suggestedQty: qty,
+        unitCost,
+        estimatedCost,
+        riskLevel: String(s.riskLevel || 'low'),
+        daysOfCover: Number(s.daysOfCover || 0),
+        avgDailySold: Number(s.avgDailySold || 0),
+      };
+    });
+
+    const totalEstimatedCost = Number(draftItems.reduce((sum, i) => sum + Number(i.estimatedCost || 0), 0).toFixed(2));
+    const now = new Date().toISOString();
+    const planNotes = input?.notes?.trim() || `Auto-generated from inventory intelligence (${period}).`;
+
+    const { data: plan, error: planErr } = await supabase
+      .from('purchase_plans')
+      .insert({
+        shop_id: shopId,
+        created_by: userId,
+        period,
+        status: 'draft',
+        source: 'inventory_intelligence',
+        notes: planNotes,
+        total_items: draftItems.length,
+        total_estimated_cost: totalEstimatedCost,
+        updated_at: now,
+      })
+      .select('*')
+      .single();
+
+    if (planErr || !plan) {
+      if (isMissingControlsTables(planErr)) {
+        throw new Error('Purchase plan tables missing. Run migration 016_purchase_plans.sql');
+      }
+      throw new Error('Failed to create purchase plan');
+    }
+
+    const itemRows = draftItems.map((item) => ({
+      plan_id: plan.id,
+      shop_id: shopId,
+      product_id: item.productId,
+      product_name: item.productName,
+      supplier_name: item.supplierName,
+      suggested_qty: item.suggestedQty,
+      unit_cost: item.unitCost,
+      estimated_cost: item.estimatedCost,
+      risk_level: item.riskLevel,
+      days_of_cover: item.daysOfCover,
+      avg_daily_sold: item.avgDailySold,
+      created_at: now,
+    }));
+    const { data: insertedItems, error: itemsErr } = await supabase
+      .from('purchase_plan_items')
+      .insert(itemRows)
+      .select('*');
+    if (itemsErr) throw new Error('Failed to create purchase plan items');
+
+    const supplierGroups = new Map<string, { supplierName: string; items: number; estimatedCost: number }>();
+    for (const item of draftItems) {
+      const key = item.supplierName || 'Unassigned supplier';
+      const prev = supplierGroups.get(key) || { supplierName: key, items: 0, estimatedCost: 0 };
+      prev.items += 1;
+      prev.estimatedCost += Number(item.estimatedCost || 0);
+      supplierGroups.set(key, prev);
+    }
+
+    await logAuditAction({
+      shopId,
+      userId,
+      action: 'purchase_plan.create',
+      entityType: 'purchase_plan',
+      entityId: String(plan.id),
+      after: plan,
+      metadata: { period, items: draftItems.length, totalEstimatedCost },
+    });
+
+    return {
+      created: true,
+      message: 'Purchase plan draft created.',
+      plan: {
+        ...plan,
+        total_estimated_cost: totalEstimatedCost,
+        items: insertedItems || [],
+        supplierGroups: Array.from(supplierGroups.values())
+          .map((g) => ({ ...g, estimatedCost: Number(g.estimatedCost.toFixed(2)) }))
+          .sort((a, b) => b.estimatedCost - a.estimatedCost),
+      },
+    };
   }
 
   async getVariancePatternAlerts(shopId: string) {

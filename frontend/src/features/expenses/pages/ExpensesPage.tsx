@@ -41,7 +41,7 @@ export default function ExpensesPage() {
   const [showAddCategory, setShowAddCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
 
-  const currency = currentShop?.currency || 'USD';
+  const currency = currentShop?.currency || 'GHS';
   const today = todayStr();
   const weekStart = weekStartStr();
   const { start: monthStart, end: monthEnd } = monthStartEnd();

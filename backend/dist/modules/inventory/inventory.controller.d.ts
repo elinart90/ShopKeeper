@@ -6,9 +6,11 @@ export declare class InventoryController {
     getProduct(req: Request, res: Response, next: NextFunction): Promise<void>;
     getProductByBarcode(req: ShopRequest, res: Response, next: NextFunction): Promise<Response<any, Record<string, any>> | undefined>;
     checkDuplicate(req: ShopRequest, res: Response, next: NextFunction): Promise<void>;
+    aiOnboardFromImage(req: ShopRequest, res: Response, next: NextFunction): Promise<void>;
     receiveStock(req: ShopRequest, res: Response, next: NextFunction): Promise<void>;
     updateProduct(req: ShopRequest, res: Response, next: NextFunction): Promise<void>;
     deleteProduct(req: ShopRequest, res: Response, next: NextFunction): Promise<void>;
+    restoreProduct(req: ShopRequest, res: Response, next: NextFunction): Promise<void>;
     getLowStockProducts(req: ShopRequest, res: Response, next: NextFunction): Promise<void>;
     getStockHistory(req: Request, res: Response, next: NextFunction): Promise<void>;
     createCategory(req: ShopRequest, res: Response, next: NextFunction): Promise<void>;

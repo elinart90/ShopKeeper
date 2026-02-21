@@ -43,6 +43,7 @@ router.post('/stock/transfers', (req, res, next) => controller.transferStock(req
 router.get('/stock/transfers', (req, res, next) => controller.listStockTransfers(req, res, next));
 router.post('/stock/supplier-deliveries', (req, res, next) => controller.recordSupplierDelivery(req, res, next));
 router.get('/stock/supplier-scorecard', (req, res, next) => controller.getSupplierScorecard(req, res, next));
+router.post('/stock/reorder-plans', requireOwner, (req, res, next) => controller.createReorderPurchasePlan(req, res, next));
 router.get('/stock/pattern-alerts', (req, res, next) => controller.getVariancePatternAlerts(req, res, next));
 
 router.get('/permissions/:userId', requireOwner, (req, res, next) => controller.getPermissions(req, res, next));

@@ -40,7 +40,7 @@ app.use((0, cors_1.default)({
 }));
 // Paystack webhook must receive raw body for signature verification (before json parser)
 app.use('/api/webhooks/paystack', express_1.default.raw({ type: 'application/json' }), webhook_paystack_1.paystackWebhook);
-app.use(express_1.default.json());
+app.use(express_1.default.json({ limit: '10mb' }));
 app.use(express_1.default.urlencoded({ extended: true }));
 // Root – so visiting / doesn't return "Cannot GET"
 app.get('/', (req, res) => {

@@ -15,6 +15,7 @@ router.use(requireShop);
 
 // Products
 router.post('/products', requirePermission('inventory.create'), (req, res, next) => controller.createProduct(req, res, next));
+router.post('/products/ai-onboarding', requirePermission('inventory.create'), (req, res, next) => controller.aiOnboardFromImage(req, res, next));
 router.get('/products', (req, res, next) => controller.getProducts(req, res, next));
 router.get('/products/check-duplicate', (req, res, next) => controller.checkDuplicate(req, res, next));
 router.get('/products/low-stock', (req, res, next) => controller.getLowStockProducts(req, res, next));

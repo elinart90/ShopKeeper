@@ -56,7 +56,7 @@ export default function SaleDetailPage() {
 
   if (!sale) return null;
 
-  const currency = currentShop.currency || 'USD';
+  const currency = currentShop.currency || 'GHS';
   const isCreditRepayment = String(sale.notes || '').includes('[CREDIT_REPAYMENT]');
   const shareReceipt = async () => {
     const phoneInput =

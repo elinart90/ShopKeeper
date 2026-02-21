@@ -1675,7 +1675,7 @@ export default function DashboardEditPage() {
                             {formatPayment(sale.payment_method)}
                           </td>
                           <td className="px-4 py-3 text-right font-medium">
-                            {(currentShop?.currency || "USD")} {Number(sale.final_amount ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                            {(currentShop?.currency || "GHS")} {Number(sale.final_amount ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                           </td>
                           <td className="px-4 py-3">
                             <span

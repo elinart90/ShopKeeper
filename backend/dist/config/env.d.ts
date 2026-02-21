@@ -7,6 +7,12 @@ export declare const env: {
     supabaseServiceKey: string;
     paystackSecretKey: string;
     paystackWebhookSecret: string;
+    geminiApiKey: string;
+    geminiModel: string;
+    openaiApiKey: string;
+    openaiModel: string;
+    claudeApiKey: string;
+    claudeModel: string;
     email: {
         host: string;
         port: number;

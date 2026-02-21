@@ -12,7 +12,8 @@ import {
   Smartphone,
   X,
   Scan,
-  CheckCircle2
+  CheckCircle2,
+  Mic
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { inventoryApi, salesApi, paymentsApi, customersApi } from '../../../lib/api';
@@ -47,6 +48,27 @@ interface CartItem {
 
 type PaymentMethod = 'cash' | 'mobile_money' | 'bank_transfer' | 'card' | 'credit';
 
+type SpeechRecognitionResultEventLike = {
+  resultIndex: number;
+  results: ArrayLike<{
+    isFinal: boolean;
+    [index: number]: { transcript: string };
+  }>;
+};
+
+type SpeechRecognitionLike = {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onresult: ((event: SpeechRecognitionResultEventLike) => void) | null;
+  onerror: ((event: Event) => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+};
+
+type SpeechRecognitionCtor = new () => SpeechRecognitionLike;
+
 export default function NewSale() {
   const { user } = useAuth();
   const { currentShop } = useShop();
@@ -61,6 +83,8 @@ export default function NewSale() {
   const [scannerStarting, setScannerStarting] = useState(false);
   const [scannerError, setScannerError] = useState<string | null>(null);
   const [fileScanning, setFileScanning] = useState(false);
+  const [voiceListening, setVoiceListening] = useState(false);
+  const [voiceSupported, setVoiceSupported] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash');
   const [discount, setDiscount] = useState(0);
   const [processing, setProcessing] = useState(false);
@@ -70,6 +94,7 @@ export default function NewSale() {
   const lastNotFoundToastAtRef = useRef(0);
   const qrCodeRegionId = 'qr-reader';
   const qrCodeFileRegionId = 'qr-reader-file';
+  const voiceRef = useRef<SpeechRecognitionLike | null>(null);
 
   const disposeScanner = (scanner: Html5Qrcode) => {
     Promise.resolve()
@@ -105,6 +130,23 @@ export default function NewSale() {
   }, [searchQuery]);
 
   useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const win = window as Window & {
+      SpeechRecognition?: SpeechRecognitionCtor;
+      webkitSpeechRecognition?: SpeechRecognitionCtor;
+    };
+    setVoiceSupported(Boolean(win.SpeechRecognition || win.webkitSpeechRecognition));
+    return () => {
+      try {
+        voiceRef.current?.stop();
+      } catch {
+        // ignore cleanup errors
+      }
+      voiceRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
     if (paymentMethod !== 'credit') return;
     if (!customerSearch.trim()) {
       setCustomerSearchResults([]);
@@ -125,7 +167,10 @@ export default function NewSale() {
     
     setLoading(true);
     try {
-      const response = await inventoryApi.getProducts({ search: searchQuery });
+      const response = await inventoryApi.getProducts({
+        search: searchQuery,
+        search_mode: 'english_first',
+      });
       setProducts(response.data.data || []);
     } catch (error: any) {
       toast.error('Failed to search products');
@@ -158,6 +203,75 @@ export default function NewSale() {
 
   const openImagePicker = () => {
     imageInputRef.current?.click();
+  };
+
+  const toggleVoiceSearch = () => {
+    if (!voiceSupported) {
+      toast.error('Voice search is not supported on this browser.');
+      return;
+    }
+
+    if (voiceListening) {
+      try {
+        voiceRef.current?.stop();
+      } catch {
+        // ignore stop errors
+      }
+      setVoiceListening(false);
+      return;
+    }
+
+    const win = window as Window & {
+      SpeechRecognition?: SpeechRecognitionCtor;
+      webkitSpeechRecognition?: SpeechRecognitionCtor;
+    };
+    const Ctor = win.SpeechRecognition || win.webkitSpeechRecognition;
+    if (!Ctor) {
+      toast.error('Voice search is unavailable on this device.');
+      return;
+    }
+
+    const recognition = new Ctor();
+    voiceRef.current = recognition;
+    recognition.continuous = false;
+    recognition.interimResults = true;
+    // en-GH captures most Ghanaian accents/Twi terms more reliably than generic en-US.
+    recognition.lang = 'en-GH';
+
+    const base = searchQuery.trim();
+    recognition.onresult = (event: SpeechRecognitionResultEventLike) => {
+      let finalText = '';
+      let interimText = '';
+      for (let i = event.resultIndex; i < event.results.length; i += 1) {
+        const transcript = String(event.results[i][0]?.transcript || '').trim();
+        if (event.results[i].isFinal) finalText += ` ${transcript}`;
+        else interimText += ` ${transcript}`;
+      }
+      const merged = `${finalText} ${interimText}`.trim();
+      if (!merged) return;
+      const cleaned = `${base}${base ? ' ' : ''}${merged}`
+        .replace(/[^\p{L}\p{N}\s-]/gu, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      setSearchQuery(cleaned);
+    };
+    recognition.onerror = () => {
+      setVoiceListening(false);
+      toast.error('Could not capture voice. Please try again.');
+    };
+    recognition.onend = () => {
+      setVoiceListening(false);
+      voiceRef.current = null;
+    };
+
+    try {
+      recognition.start();
+      setVoiceListening(true);
+      toast.success('Speak product name in Twi or English...');
+    } catch {
+      setVoiceListening(false);
+      toast.error('Failed to start microphone.');
+    }
   };
 
   const handleImageSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -562,7 +676,7 @@ export default function NewSale() {
         shopPhone: currentShop?.phone,
         shopEmail: currentShop?.email,
         cashierName: user?.name || user?.email || 'Cashier',
-        currency: currentShop?.currency || 'USD',
+        currency: currentShop?.currency || 'GHS',
       });
 
       const shared = await trySharePdfFile(
@@ -581,7 +695,7 @@ export default function NewSale() {
       const message = buildWhatsAppReceiptMessage({
         sale: receiptPromptSale,
         shopName: currentShop?.name || 'ShopKeeper',
-        currency: currentShop?.currency || 'USD',
+        currency: currentShop?.currency || 'GHS',
       });
       const waUrl = buildWhatsAppLink(normalizedPhone, message);
       const opened = window.open(waUrl, '_blank');
@@ -651,6 +765,22 @@ export default function NewSale() {
                 </div>
                 <div className="flex gap-2 sm:w-auto">
                   <button
+                    type="button"
+                    onClick={toggleVoiceSearch}
+                    disabled={!voiceSupported}
+                    className={`flex-1 sm:flex-none px-3 py-2 rounded-lg border text-sm transition ${
+                      voiceListening
+                        ? 'border-red-300 bg-red-50 text-red-700 dark:border-red-700 dark:bg-red-900/20 dark:text-red-300'
+                        : 'border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                    } disabled:opacity-50`}
+                    title={voiceListening ? 'Stop voice search' : 'Start voice search'}
+                  >
+                    <span className="inline-flex items-center gap-1.5">
+                      <Mic className="h-4 w-4" />
+                      {voiceListening ? 'Listening...' : 'Voice'}
+                    </span>
+                  </button>
+                  <button
                     onClick={scanBarcode}
                     disabled={fileScanning}
                     className={`flex-1 sm:flex-none px-4 py-2 rounded-lg font-medium transition ${
@@ -679,6 +809,11 @@ export default function NewSale() {
                 className="hidden"
               />
               <div id={qrCodeFileRegionId} className="hidden"></div>
+              {!voiceSupported && (
+                <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
+                  Voice search not available on this browser. Use Chrome/Edge for microphone search.
+                </p>
+              )}
 
               {/* QR Scanner */}
               {scanning && (
@@ -732,7 +867,7 @@ export default function NewSale() {
                         </div>
                         <div className="text-right">
                           <p className="font-semibold text-emerald-600 dark:text-emerald-400">
-                            {currentShop?.currency || 'USD'} {product.selling_price?.toFixed(2)}
+                            {currentShop?.currency || 'GHS'} {product.selling_price?.toFixed(2)}
                           </p>
                         </div>
                       </div>
@@ -774,7 +909,7 @@ export default function NewSale() {
                             {item.name}
                           </h3>
                           <p className="text-sm text-gray-600 dark:text-gray-400">
-                            {currentShop?.currency || 'USD'} {item.unit_price.toFixed(2)} × {item.quantity}
+                            {currentShop?.currency || 'GHS'} {item.unit_price.toFixed(2)} × {item.quantity}
                           </p>
                         </div>
                         <div className="flex items-center gap-4">
@@ -820,7 +955,7 @@ export default function NewSale() {
                           </div>
                           <div className="text-right">
                             <p className="font-semibold text-gray-900 dark:text-white">
-                              {currentShop?.currency || 'USD'} {item.total.toFixed(2)}
+                              {currentShop?.currency || 'GHS'} {item.total.toFixed(2)}
                             </p>
                           </div>
                           <button
@@ -1002,7 +1137,7 @@ export default function NewSale() {
                 {/* Discount */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    Discount ({currentShop?.currency || 'USD'})
+                    Discount ({currentShop?.currency || 'GHS'})
                   </label>
                   <input
                     type="number"
@@ -1019,21 +1154,21 @@ export default function NewSale() {
                   <div className="flex justify-between text-sm">
                     <span className="text-gray-600 dark:text-gray-400">Subtotal</span>
                     <span className="text-gray-900 dark:text-white">
-                      {currentShop?.currency || 'USD'} {subtotal.toFixed(2)}
+                      {currentShop?.currency || 'GHS'} {subtotal.toFixed(2)}
                     </span>
                   </div>
                   {discount > 0 && (
                     <div className="flex justify-between text-sm">
                       <span className="text-gray-600 dark:text-gray-400">Discount</span>
                       <span className="text-red-600 dark:text-red-400">
-                        -{currentShop?.currency || 'USD'} {discount.toFixed(2)}
+                        -{currentShop?.currency || 'GHS'} {discount.toFixed(2)}
                       </span>
                     </div>
                   )}
                   <div className="flex justify-between text-lg font-bold pt-2 border-t border-gray-200 dark:border-gray-700">
                     <span className="text-gray-900 dark:text-white">Total</span>
                     <span className="text-emerald-600 dark:text-emerald-400">
-                      {currentShop?.currency || 'USD'} {total.toFixed(2)}
+                      {currentShop?.currency || 'GHS'} {total.toFixed(2)}
                     </span>
                   </div>
                 </div>

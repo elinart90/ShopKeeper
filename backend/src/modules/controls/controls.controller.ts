@@ -446,6 +446,31 @@ export class ControlsController {
     }
   }
 
+  async createReorderPurchasePlan(req: ShopRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.shopId || !req.userId) throw new AppError('Shop ID and User ID are required', 400);
+      const periodRaw = String(req.body?.period || 'weekly').toLowerCase();
+      if (!['daily', 'weekly', 'monthly'].includes(periodRaw)) {
+        throw new AppError('period must be daily, weekly, or monthly', 400);
+      }
+      const maxItems = req.body?.maxItems != null ? Number(req.body.maxItems) : undefined;
+      const supplierStrategyRaw = String(req.body?.supplierStrategy || 'last_supplier').toLowerCase();
+      if (!['last_supplier', 'best_scorecard'].includes(supplierStrategyRaw)) {
+        throw new AppError('supplierStrategy must be last_supplier or best_scorecard', 400);
+      }
+      const notes = typeof req.body?.notes === 'string' ? req.body.notes : undefined;
+      const data = await controlsService.createReorderPurchasePlan(req.shopId, req.userId, {
+        period: periodRaw as 'daily' | 'weekly' | 'monthly',
+        maxItems: Number.isFinite(maxItems as number) ? Number(maxItems) : undefined,
+        supplierStrategy: supplierStrategyRaw as 'last_supplier' | 'best_scorecard',
+        notes,
+      });
+      res.status(201).json({ success: true, data });
+    } catch (error) {
+      errorHandler(error as AppError, req, res, next);
+    }
+  }
+
   async getVariancePatternAlerts(req: ShopRequest, res: Response, next: NextFunction) {
     try {
       if (!req.shopId) throw new AppError('Shop ID is required', 400);

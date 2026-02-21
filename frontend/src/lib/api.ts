@@ -159,6 +159,8 @@ export const inventoryApi = {
   getProductByBarcode: (barcode: string) => api.get(`/inventory/products/barcode/${barcode}`),
   checkDuplicate: (params: { barcode?: string; name?: string }) =>
     api.get('/inventory/products/check-duplicate', { params }),
+  aiOnboardFromImage: (data: { imageDataUrl: string; hints?: { name?: string; barcode?: string } }) =>
+    api.post('/inventory/products/ai-onboarding', data),
   createProduct: (data: any) => api.post('/inventory/products', data),
   updateProduct: (id: string, data: any) => api.patch(`/inventory/products/${id}`, data),
   receiveStock: (id: string, data: { quantity: number; note?: string; unit_cost?: number }) =>
@@ -233,8 +235,18 @@ export const reportsApi = {
   getDashboardStats: (params?: any) => api.get('/reports/dashboard', { params }),
   getSalesIntelligence: (params?: any) => api.get('/reports/sales-intelligence', { params }),
   getInventoryFinance: (params?: { days?: number }) => api.get('/reports/inventory-finance', { params }),
+  getInventoryStockIntelligence: (params?: { period?: 'daily' | 'weekly' | 'monthly' }) =>
+    api.get<{ success: boolean; data: InventoryStockIntelligenceData }>('/reports/inventory-intelligence', { params }),
+  queryInventoryStockIntelligence: (data: { query: string; period?: 'daily' | 'weekly' | 'monthly' }) =>
+    api.post<{ success: boolean; data: InventoryStockIntelligenceQueryData }>('/reports/inventory-intelligence/query', data),
   getExpensesProfit: (params?: { startDate?: string; endDate?: string }) =>
     api.get('/reports/expenses-profit', { params }),
+  getBusinessIntelligence: (params?: { period?: 'daily' | 'weekly' | 'monthly' }) =>
+    api.get<{ success: boolean; data: BusinessIntelligenceData }>('/reports/business-intelligence', { params }),
+  queryBusinessIntelligence: (data: { query: string; period?: 'daily' | 'weekly' | 'monthly' }) =>
+    api.post<{ success: boolean; data: BusinessIntelligenceQueryData }>('/reports/business-intelligence/query', data),
+  getNaturalLanguageReport: (data: { query: string; language?: 'en' | 'twi' | 'auto' }) =>
+    api.post<{ success: boolean; data: NaturalLanguageReportData }>('/reports/natural-language', data),
   getComplianceExport: (params: {
     type: 'daily' | 'weekly' | 'monthly' | 'pl' | 'tax';
     date?: string;
@@ -244,6 +256,129 @@ export const reportsApi = {
     endDate?: string;
   }) => api.get<{ success: boolean; data: ComplianceExportData }>('/reports/compliance-export', { params }),
 };
+
+export interface BusinessIntelligenceData {
+  providerUsed: 'openai' | 'claude';
+  period: 'daily' | 'weekly' | 'monthly';
+  windows: {
+    current: { startDate: string; endDate: string };
+    previous: { startDate: string; endDate: string };
+  };
+  dailyWeeklyMonthlySummary: string;
+  todayVsYesterdayExplanation: string;
+  trendDetection: {
+    revenueTrend: 'up' | 'down' | 'flat';
+    profitTrend: 'up' | 'down' | 'flat';
+    narrative: string;
+    aiNarrative: string;
+  };
+  forecast: {
+    next7Days: { revenue: number; profit: number };
+    next30Days: { revenue: number; profit: number };
+    confidence: 'low' | 'medium' | 'high' | string;
+  };
+  kpiHealthScore: {
+    score: number;
+    status: 'healthy' | 'watch' | 'critical' | string;
+    reasons: string[];
+  };
+  whyProfitDown: string;
+  topSellingProducts: Array<{ productId: string; name: string; quantitySold: number; revenue: number }>;
+  lowPerformingProducts: Array<{ productId: string; name: string; quantitySold: number; revenue: number }>;
+  paymentMethodInsights: {
+    mix: Array<{ method: string; amount: number; sharePercent: number }>;
+    narrative: string;
+  };
+  naturalLanguageDashboardQueryHint: string;
+  snapshot: Record<string, unknown>;
+}
+
+export interface BusinessIntelligenceQueryData {
+  providerUsed: 'openai' | 'claude';
+  period: 'daily' | 'weekly' | 'monthly';
+  query: string;
+  answer: string;
+  basedOn: {
+    window: { startDate: string; endDate: string };
+    health: { score: number; status: string; reasons: string[] };
+  };
+}
+
+export interface InventoryStockIntelligenceData {
+  providerUsed: 'openai' | 'claude';
+  period: 'daily' | 'weekly' | 'monthly';
+  windows: {
+    current: { startDate: string; endDate: string };
+    previous: { startDate: string; endDate: string };
+  };
+  summary: string;
+  trendNarrative: string;
+  priorityAction: string;
+  kpiHealthScore: {
+    score: number;
+    status: 'healthy' | 'watch' | 'critical' | string;
+    reasons: string[];
+  };
+  topSellingProducts: Array<{ productId: string; name: string; quantitySold: number; revenue: number }>;
+  lowPerformingProducts: Array<{ productId: string; name: string; quantitySold: number; revenue: number }>;
+  deadStockAlerts: Array<{ productId: string; name: string; stockQuantity: number; stockValue: number }>;
+  stockoutRisk: Array<{
+    productId: string;
+    name: string;
+    stockQty: number;
+    avgDailySold: number;
+    daysOfCover: number;
+    riskLevel: 'high' | 'medium' | 'low' | string;
+    reorderQty: number;
+    estimatedReorderCost: number;
+  }>;
+  reorderSuggestions: Array<{
+    productId: string;
+    name: string;
+    stockQty: number;
+    avgDailySold: number;
+    daysOfCover: number;
+    riskLevel: 'high' | 'medium' | 'low' | string;
+    reorderQty: number;
+    estimatedReorderCost: number;
+  }>;
+  paymentMethodInsights: {
+    cashShareNow: number;
+    momoShareNow: number;
+    cashSharePrev: number;
+    momoSharePrev: number;
+    cashTrendPct: number;
+    momoTrendPct: number;
+  };
+  snapshot: Record<string, unknown>;
+}
+
+export interface InventoryStockIntelligenceQueryData {
+  providerUsed: 'openai' | 'claude';
+  period: 'daily' | 'weekly' | 'monthly';
+  query: string;
+  answer: string;
+  basedOn: {
+    window: { startDate: string; endDate: string };
+    health: { score: number; status: string; reasons: string[] };
+  };
+}
+
+export interface NaturalLanguageReportData {
+  intent: 'dashboard' | 'sales_intelligence' | 'inventory_finance' | 'expenses_profit' | 'compliance_export';
+  language: 'en' | 'twi';
+  periodLabel: string;
+  providerUsed: 'gemini' | 'openai';
+  intentProvider: 'gemini' | 'openai' | 'heuristic';
+  answer: string;
+  snapshot: Record<string, unknown>;
+  chartReferences?: {
+    key: string;
+    title: string;
+    points: Array<Record<string, string | number>>;
+  };
+  sourceRange: { startDate: string; endDate: string };
+}
 
 export interface ShiftSession {
   id: string;
@@ -392,6 +527,38 @@ export interface StockTransfer {
   product?: { id: string; name: string; barcode?: string; sku?: string };
 }
 
+export interface PurchasePlanItem {
+  id: string;
+  plan_id: string;
+  shop_id: string;
+  product_id: string;
+  product_name: string;
+  supplier_name?: string | null;
+  suggested_qty: number;
+  unit_cost: number;
+  estimated_cost: number;
+  risk_level: string;
+  days_of_cover?: number | null;
+  avg_daily_sold?: number | null;
+  created_at: string;
+}
+
+export interface PurchasePlanDraft {
+  id: string;
+  shop_id: string;
+  created_by: string;
+  period: 'daily' | 'weekly' | 'monthly';
+  status: string;
+  source: string;
+  notes?: string | null;
+  total_items: number;
+  total_estimated_cost: number;
+  created_at: string;
+  updated_at: string;
+  items: PurchasePlanItem[];
+  supplierGroups: Array<{ supplierName: string; items: number; estimatedCost: number }>;
+}
+
 export const controlsApi = {
   startShift: (data: { opening_cash: number; notes?: string }) =>
     api.post<{ success: boolean; data: ShiftSession }>('/controls/shifts/start', data),
@@ -506,6 +673,16 @@ export const controlsApi = {
         shortDeliveries: number;
       }>;
     }>('/controls/stock/supplier-scorecard', { params }),
+  createReorderPurchasePlan: (data?: {
+    period?: 'daily' | 'weekly' | 'monthly';
+    maxItems?: number;
+    supplierStrategy?: 'last_supplier' | 'best_scorecard';
+    notes?: string;
+  }) =>
+    api.post<{ success: boolean; data: { created: boolean; message: string; plan: PurchasePlanDraft | null } }>(
+      '/controls/stock/reorder-plans',
+      data || {}
+    ),
   getPatternAlerts: () =>
     api.get<{
       success: boolean;

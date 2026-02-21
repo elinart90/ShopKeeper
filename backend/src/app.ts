@@ -37,7 +37,7 @@ app.use(cors({
 // Paystack webhook must receive raw body for signature verification (before json parser)
 app.use('/api/webhooks/paystack', express.raw({ type: 'application/json' }), paystackWebhook);
 
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
 // Root – so visiting / doesn't return "Cannot GET"

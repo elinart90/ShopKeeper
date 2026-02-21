@@ -8,6 +8,7 @@ import {
   Barcode,
   ChevronDown,
   ChevronRight,
+  Sparkles,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import toast from 'react-hot-toast';
@@ -35,6 +36,7 @@ export default function AddProductPage() {
   const navigate = useNavigate();
   const barcodeInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const aiImageInputRef = useRef<HTMLInputElement>(null);
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const handlingScanRef = useRef(false);
 
@@ -85,6 +87,7 @@ export default function AddProductPage() {
   const [, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string>('');
   const [saving, setSaving] = useState(false);
+  const [aiLoading, setAiLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const isOwner = currentShop?.role === 'owner';
 
@@ -190,6 +193,74 @@ export default function AddProductPage() {
     } finally {
       setFileScanning(false);
     }
+  };
+
+  const fileToDataUrl = (file: File) =>
+    new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ''));
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+
+  const applyAiSuggestions = (aiData: any) => {
+    const suggested = aiData?.suggested || {};
+    const categoryName = String(suggested?.category_name || '').trim().toLowerCase();
+    const matchedCategory = categoryName
+      ? categories.find((c: any) => String(c.name || '').trim().toLowerCase() === categoryName)
+      : null;
+
+    setForm((f) => ({
+      ...f,
+      name: f.name || suggested?.name || '',
+      barcode: f.barcode || suggested?.barcode || '',
+      selling_price:
+        f.selling_price || (Number.isFinite(Number(suggested?.selling_price_hint))
+          ? String(Number(suggested.selling_price_hint))
+          : ''),
+      cost_price:
+        f.cost_price || (Number.isFinite(Number(suggested?.cost_price_hint))
+          ? String(Number(suggested.cost_price_hint))
+          : ''),
+      unit:
+        (f.unit === 'piece' && suggested?.unit && suggested.unit !== 'piece')
+          ? suggested.unit
+          : f.unit || suggested?.unit || 'piece',
+      category_id: f.category_id || matchedCategory?.id || '',
+      description: f.description || suggested?.description_hint || '',
+    }));
+  };
+
+  const runAiOnboardingFromFile = async (file: File) => {
+    setAiLoading(true);
+    try {
+      setPhotoFile(file);
+      const dataUrl = await fileToDataUrl(file);
+      setPhotoPreview(dataUrl);
+      const res = await inventoryApi.aiOnboardFromImage({
+        imageDataUrl: dataUrl,
+        hints: { name: form.name, barcode: form.barcode },
+      });
+      applyAiSuggestions(res.data?.data);
+      setEntryMode('form');
+      toast.success('AI suggestions applied. Please review before saving.');
+    } catch (err: any) {
+      const message =
+        err?.response?.data?.error?.message ||
+        err?.response?.data?.message ||
+        err?.message ||
+        'Failed to analyze product image with AI';
+      toast.error(message);
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const handleAiImageSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    await runAiOnboardingFromFile(file);
   };
 
   useEffect(() => {
@@ -464,6 +535,33 @@ export default function AddProductPage() {
               </div>
               <ChevronRight className="h-5 w-5 text-gray-400" />
             </button>
+
+            <button
+              type="button"
+              onClick={() => aiImageInputRef.current?.click()}
+              disabled={aiLoading}
+              className="w-full flex items-center gap-4 p-4 rounded-xl border border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-900/20 hover:border-emerald-500 text-left disabled:opacity-60"
+            >
+              <div className="p-3 rounded-lg bg-emerald-100 dark:bg-emerald-800/60">
+                <Sparkles className="h-6 w-6 text-emerald-700 dark:text-emerald-300" />
+              </div>
+              <div className="flex-1">
+                <span className="font-semibold text-gray-900 dark:text-white block">
+                  AI smart onboarding
+                </span>
+                <span className="text-sm text-gray-600 dark:text-gray-300">
+                  Upload product photo to auto-fill name, barcode, unit, category and price hints
+                </span>
+              </div>
+              <ChevronRight className="h-5 w-5 text-gray-400" />
+            </button>
+            <input
+              ref={aiImageInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={handleAiImageSelected}
+            />
           </div>
         </div>
       </div>

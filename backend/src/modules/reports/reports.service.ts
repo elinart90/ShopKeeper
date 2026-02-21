@@ -1,4 +1,5 @@
 import { supabase } from '../../config/supabase';
+import { env } from '../../config/env';
 import { logger } from '../../utils/logger';
 
 /** Normalize date range to full days: start = 00:00:00, end = 23:59:59.999 (UTC) so sales that day are included. */
@@ -32,6 +33,14 @@ async function getDataClearedAt(shopId: string): Promise<string | null> {
 }
 
 export class ReportsService {
+  private normalizeCurrencyText(text: string, currencyCode: string = 'GHS') {
+    return String(text || '')
+      .replace(/\$/g, `${currencyCode} `)
+      .replace(new RegExp(`\\bUSD\\b`, 'gi'), currencyCode)
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+  }
+
   async getDashboardStats(shopId: string, startDate?: string, endDate?: string) {
     try {
       const { start: startTs, end: endTs } = toDateRange(startDate, endDate);
@@ -776,6 +785,832 @@ export class ReportsService {
       expensesByCategory: pl.expensesByCategory,
       dailyNetProfit: pl.dailyNetProfit,
       ...(type === 'monthly' && { monthlyTrend: pl.monthlyTrend }),
+    };
+  }
+
+  private getPeriodWindows(period: 'daily' | 'weekly' | 'monthly') {
+    const now = new Date();
+    const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    const days = period === 'daily' ? 1 : period === 'weekly' ? 7 : 30;
+    const start = new Date(today);
+    start.setUTCDate(today.getUTCDate() - (days - 1));
+    const end = today;
+    const prevEnd = new Date(start);
+    prevEnd.setUTCDate(start.getUTCDate() - 1);
+    const prevStart = new Date(prevEnd);
+    prevStart.setUTCDate(prevEnd.getUTCDate() - (days - 1));
+    return {
+      current: { startDate: toIsoDateOnly(start), endDate: toIsoDateOnly(end) },
+      previous: { startDate: toIsoDateOnly(prevStart), endDate: toIsoDateOnly(prevEnd) },
+      days,
+    };
+  }
+
+  private buildForecast(recentDailyMetrics: Array<{ date: string; revenue: number; expenses: number; profit: number }>) {
+    const rows = (recentDailyMetrics || []).slice(-14);
+    if (!rows.length) {
+      return {
+        next7Days: { revenue: 0, profit: 0 },
+        next30Days: { revenue: 0, profit: 0 },
+        confidence: 'low',
+      };
+    }
+    const avgRevenue = rows.reduce((s, r) => s + Number(r.revenue || 0), 0) / rows.length;
+    const avgProfit = rows.reduce((s, r) => s + Number(r.profit || 0), 0) / rows.length;
+    const firstRev = Number(rows[0]?.revenue || 0);
+    const lastRev = Number(rows[rows.length - 1]?.revenue || 0);
+    const trendFactor = firstRev > 0 ? Math.max(-0.2, Math.min(0.2, (lastRev - firstRev) / firstRev)) : 0;
+    return {
+      next7Days: {
+        revenue: Math.max(0, avgRevenue * 7 * (1 + trendFactor)),
+        profit: avgProfit * 7 * (1 + trendFactor),
+      },
+      next30Days: {
+        revenue: Math.max(0, avgRevenue * 30 * (1 + trendFactor)),
+        profit: avgProfit * 30 * (1 + trendFactor),
+      },
+      confidence: rows.length >= 10 ? 'medium' : 'low',
+    };
+  }
+
+  private computeKpiHealthScore(input: {
+    stats: any;
+    comparison: any;
+    inventoryFinance: any;
+  }) {
+    const reasons: string[] = [];
+    let score = 100;
+    const profit = Number(input.stats?.profit || 0);
+    const sales = Number(input.stats?.totalSales || 0);
+    const expenses = Number(input.stats?.totalExpenses || 0);
+    const lowStockCount = Number(input.stats?.lowStockCount || 0);
+    const revenueChange = Number(input.comparison?.revenueChangePercent || 0);
+    const profitChange = Number(input.comparison?.profitChangePercent || 0);
+    const expenseRatio = sales > 0 ? expenses / sales : 1;
+
+    if (profit < 0) {
+      score -= 25;
+      reasons.push('Profit is negative in the selected period.');
+    }
+    if (expenseRatio > 0.65) {
+      score -= 20;
+      reasons.push('Expenses are high relative to sales.');
+    }
+    if (profitChange < -10) {
+      score -= 15;
+      reasons.push('Profit dropped significantly vs previous period.');
+    }
+    if (revenueChange < -10) {
+      score -= 10;
+      reasons.push('Revenue is trending down vs previous period.');
+    }
+    if (lowStockCount >= 5) {
+      score -= 10;
+      reasons.push('Multiple low-stock items can limit sales.');
+    }
+    const deadStockCount = Number((input.inventoryFinance?.deadStock || []).length || 0);
+    if (deadStockCount >= 5) {
+      score -= 10;
+      reasons.push('Dead stock is tying up working capital.');
+    }
+
+    score = Math.max(0, Math.min(100, Math.round(score)));
+    const status = score >= 80 ? 'healthy' : score >= 60 ? 'watch' : 'critical';
+    if (!reasons.length) reasons.push('Core KPIs look stable.');
+    return { score, status, reasons };
+  }
+
+  async getBusinessIntelligence(
+    shopId: string,
+    _userId: string,
+    period: 'daily' | 'weekly' | 'monthly' = 'daily'
+  ) {
+    const windows = this.getPeriodWindows(period);
+    const [currentStats, previousStats, currentIntel, currentInventory] = await Promise.all([
+      this.getDashboardStats(shopId, windows.current.startDate, windows.current.endDate),
+      this.getDashboardStats(shopId, windows.previous.startDate, windows.previous.endDate),
+      this.getSalesIntelligence(shopId, windows.current.startDate, windows.current.endDate),
+      this.getInventoryFinance(shopId, 30),
+    ]);
+
+    const comparison = {
+      revenueNow: Number(currentStats?.totalSales || 0),
+      revenuePrev: Number(previousStats?.totalSales || 0),
+      revenueChangePercent: pctChange(Number(currentStats?.totalSales || 0), Number(previousStats?.totalSales || 0)),
+      profitNow: Number(currentStats?.profit || 0),
+      profitPrev: Number(previousStats?.profit || 0),
+      profitChangePercent: pctChange(Number(currentStats?.profit || 0), Number(previousStats?.profit || 0)),
+      txNow: Number(currentStats?.totalTransactions || 0),
+      txPrev: Number(previousStats?.totalTransactions || 0),
+      txChangePercent: pctChange(Number(currentStats?.totalTransactions || 0), Number(previousStats?.totalTransactions || 0)),
+    };
+
+    const todayVsYesterdayExplanation =
+      Number(currentIntel?.dailyComparison?.profitChangePercent || 0) < 0
+        ? 'Profit is down mainly due to lower revenue and/or higher expenses than yesterday.'
+        : 'Profit is stable or improving versus yesterday, supported by current sales performance.';
+
+    const trendDetection = {
+      revenueTrend:
+        comparison.revenueChangePercent > 5 ? 'up' : comparison.revenueChangePercent < -5 ? 'down' : 'flat',
+      profitTrend:
+        comparison.profitChangePercent > 5 ? 'up' : comparison.profitChangePercent < -5 ? 'down' : 'flat',
+      narrative:
+        comparison.revenueChangePercent > 5
+          ? 'Sales momentum is improving.'
+          : comparison.revenueChangePercent < -5
+            ? 'Sales momentum is weakening.'
+            : 'Sales momentum is mostly stable.',
+    };
+
+    const forecast = this.buildForecast(currentIntel?.recentDailyMetrics || []);
+    const kpiHealth = this.computeKpiHealthScore({
+      stats: currentStats,
+      comparison: {
+        revenueChangePercent: comparison.revenueChangePercent,
+        profitChangePercent: comparison.profitChangePercent,
+      },
+      inventoryFinance: currentInventory,
+    });
+
+    const paymentInsights = Object.entries(currentStats?.paymentMethodBreakdown || {})
+      .map(([method, amount]) => ({ method, amount: Number(amount || 0) }))
+      .sort((a, b) => b.amount - a.amount);
+    const totalPayment = paymentInsights.reduce((s, p) => s + p.amount, 0);
+    const paymentMix = paymentInsights.map((p) => ({
+      ...p,
+      sharePercent: totalPayment > 0 ? (p.amount / totalPayment) * 100 : 0,
+    }));
+
+    const snapshot = {
+      period,
+      window: windows.current,
+      comparison,
+      kpis: {
+        sales: Number(currentStats?.totalSales || 0),
+        expenses: Number(currentStats?.totalExpenses || 0),
+        profit: Number(currentStats?.profit || 0),
+        transactions: Number(currentStats?.totalTransactions || 0),
+      },
+      topSellingProducts: (currentIntel?.topProducts || []).slice(0, 5),
+      lowPerformingProducts: (currentIntel?.slowMovingProducts || []).slice(0, 5),
+      paymentMix: paymentMix.slice(0, 5),
+      forecast,
+      health: kpiHealth,
+    };
+
+    const summaryPrompt = `
+You are ShopKeeper BI Copilot for non-technical merchants.
+Create a concise business summary using ONLY this JSON:
+${JSON.stringify(snapshot, null, 2)}
+
+Currency rules:
+- Use GHS as the currency label.
+- Never use "$" or "USD".
+
+Return JSON only:
+{
+  "summary": string,
+  "todayVsYesterday": string,
+  "trendInsight": string,
+  "profitDownWhy": string,
+  "engagementHint": string
+}
+`;
+
+    const ai = await this.callOpenAiThenClaude(summaryPrompt);
+    const parsed = this.parseAiJson(ai.text) || {};
+
+    return {
+      providerUsed: ai.provider,
+      period,
+      windows,
+      dailyWeeklyMonthlySummary: this.normalizeCurrencyText(String(parsed?.summary || '')),
+      todayVsYesterdayExplanation: this.normalizeCurrencyText(String(parsed?.todayVsYesterday || todayVsYesterdayExplanation)),
+      trendDetection: {
+        ...trendDetection,
+        aiNarrative: this.normalizeCurrencyText(String(parsed?.trendInsight || trendDetection.narrative)),
+      },
+      forecast,
+      kpiHealthScore: kpiHealth,
+      whyProfitDown: this.normalizeCurrencyText(String(parsed?.profitDownWhy || 'Review sales trend, expense ratio, and payment mix shifts.')),
+      topSellingProducts: snapshot.topSellingProducts,
+      lowPerformingProducts: snapshot.lowPerformingProducts,
+      paymentMethodInsights: {
+        mix: paymentMix,
+        narrative: this.normalizeCurrencyText(
+          paymentMix.length > 0
+            ? `Top method: ${paymentMix[0].method} (${paymentMix[0].sharePercent.toFixed(1)}%).`
+            : 'No payment method data in selected period.'
+        ),
+      },
+      naturalLanguageDashboardQueryHint: this.normalizeCurrencyText(
+        String(parsed?.engagementHint || 'Ask: "Why is profit down?"')
+      ),
+      snapshot,
+    };
+  }
+
+  async queryBusinessIntelligence(
+    shopId: string,
+    userId: string,
+    query: string,
+    period: 'daily' | 'weekly' | 'monthly' = 'daily'
+  ) {
+    const bi = await this.getBusinessIntelligence(shopId, userId, period);
+    const prompt = `
+You are ShopKeeper BI assistant.
+Answer the merchant query using ONLY this BI payload.
+Query: ${query}
+BI payload:
+${JSON.stringify(bi?.snapshot || {}, null, 2)}
+
+Return concise practical text with:
+- direct answer
+- 2-4 bullet insights
+- one recommended action
+
+Currency rules:
+- Use GHS as the currency label.
+- Never use "$" or "USD".
+`;
+    const ai = await this.callOpenAiThenClaude(prompt);
+    return {
+      providerUsed: ai.provider,
+      period,
+      query,
+      answer: this.normalizeCurrencyText(ai.text),
+      basedOn: {
+        window: bi?.windows?.current,
+        health: bi?.kpiHealthScore,
+      },
+    };
+  }
+
+  async getInventoryStockIntelligence(
+    shopId: string,
+    _userId: string,
+    period: 'daily' | 'weekly' | 'monthly' = 'weekly'
+  ) {
+    const windows = this.getPeriodWindows(period);
+    const [inventoryFinance, salesIntelCurrent, salesIntelPrev] = await Promise.all([
+      this.getInventoryFinance(shopId, period === 'daily' ? 14 : period === 'weekly' ? 30 : 60),
+      this.getSalesIntelligence(shopId, windows.current.startDate, windows.current.endDate),
+      this.getSalesIntelligence(shopId, windows.previous.startDate, windows.previous.endDate),
+    ]);
+
+    const days = windows.days;
+    const soldQtyByProduct = ((salesIntelCurrent?.topProducts || []) as any[]).reduce((acc: Record<string, number>, p: any) => {
+      acc[String(p.productId)] = Number(p.quantitySold || 0);
+      return acc;
+    }, {});
+
+    const { data: products } = await supabase
+      .from('products')
+      .select('id,name,stock_quantity,min_stock_level,cost_price,selling_price')
+      .eq('shop_id', shopId)
+      .eq('is_active', true);
+    const productList = products || [];
+
+    const stockoutRisk = productList
+      .map((p: any) => {
+        const soldQty = Number(soldQtyByProduct[p.id] || 0);
+        const avgDailySold = soldQty / Math.max(1, days);
+        const stockQty = Number(p.stock_quantity || 0);
+        const daysOfCover = avgDailySold > 0 ? stockQty / avgDailySold : 999;
+        const riskLevel = avgDailySold <= 0
+          ? 'low'
+          : daysOfCover <= 3
+            ? 'high'
+            : daysOfCover <= 7
+              ? 'medium'
+              : 'low';
+        const targetStock = Math.max(Number(p.min_stock_level || 0), Math.ceil(avgDailySold * 14));
+        const reorderQty = Math.max(0, targetStock - stockQty);
+        return {
+          productId: p.id,
+          name: p.name || 'Unknown',
+          stockQty,
+          avgDailySold,
+          daysOfCover: Number.isFinite(daysOfCover) ? Number(daysOfCover.toFixed(1)) : 999,
+          riskLevel,
+          reorderQty,
+          estimatedReorderCost: reorderQty * Number(p.cost_price || 0),
+        };
+      })
+      .filter((r) => r.stockQty > 0 || r.avgDailySold > 0)
+      .sort((a, b) => {
+        const sev = { high: 3, medium: 2, low: 1 } as Record<string, number>;
+        return sev[b.riskLevel] - sev[a.riskLevel] || a.daysOfCover - b.daysOfCover;
+      })
+      .slice(0, 15);
+
+    const reorderSuggestions = stockoutRisk
+      .filter((r) => r.reorderQty > 0)
+      .slice(0, 10);
+
+    const paymentCurrent = salesIntelCurrent?.paymentMethodBreakdown || {};
+    const paymentPrev = salesIntelPrev?.paymentMethodBreakdown || {};
+    const payAmount = (obj: any, key: string) => Number(obj?.[key]?.amount || 0);
+    const currentTotalPay = Object.values(paymentCurrent as any).reduce((s: number, p: any) => s + Number(p?.amount || 0), 0);
+    const prevTotalPay = Object.values(paymentPrev as any).reduce((s: number, p: any) => s + Number(p?.amount || 0), 0);
+    const cashNow = payAmount(paymentCurrent, 'cash');
+    const momoNow = payAmount(paymentCurrent, 'mobile_money');
+    const cashPrev = payAmount(paymentPrev, 'cash');
+    const momoPrev = payAmount(paymentPrev, 'mobile_money');
+    const paymentInsights = {
+      cashShareNow: currentTotalPay > 0 ? (cashNow / currentTotalPay) * 100 : 0,
+      momoShareNow: currentTotalPay > 0 ? (momoNow / currentTotalPay) * 100 : 0,
+      cashSharePrev: prevTotalPay > 0 ? (cashPrev / prevTotalPay) * 100 : 0,
+      momoSharePrev: prevTotalPay > 0 ? (momoPrev / prevTotalPay) * 100 : 0,
+      cashTrendPct: pctChange(cashNow, cashPrev),
+      momoTrendPct: pctChange(momoNow, momoPrev),
+    };
+
+    const snapshot = {
+      period,
+      window: windows.current,
+      totalStockValue: Number(inventoryFinance?.totalStockValue || 0),
+      lowStockCount: Number((inventoryFinance?.lowStock || []).length),
+      deadStockCount: Number((inventoryFinance?.deadStock || []).length),
+      deadStockValue: Number((inventoryFinance?.deadStock || []).reduce((s: number, d: any) => s + Number(d.stockValue || 0), 0)),
+      topSellingProducts: (salesIntelCurrent?.topProducts || []).slice(0, 8),
+      lowPerformingProducts: (salesIntelCurrent?.slowMovingProducts || []).slice(0, 8),
+      stockoutRisk: stockoutRisk.slice(0, 8),
+      reorderSuggestions: reorderSuggestions.slice(0, 8),
+      paymentInsights,
+    };
+
+    const prompt = `
+You are ShopKeeper Inventory Intelligence Copilot.
+Use only this JSON:
+${JSON.stringify(snapshot, null, 2)}
+
+Return JSON only:
+{
+  "summary": string,
+  "trendNarrative": string,
+  "priorityAction": string,
+  "kpiHealthReasons": string[]
+}
+Currency rules:
+- Use GHS.
+- Never use "$" or "USD".
+`;
+    const ai = await this.callOpenAiThenClaude(prompt);
+    const parsed = this.parseAiJson(ai.text) || {};
+
+    const healthScoreRaw = 100
+      - Math.min(35, Number((inventoryFinance?.lowStock || []).length || 0) * 3)
+      - Math.min(35, Number((inventoryFinance?.deadStock || []).length || 0) * 2)
+      - Math.min(20, stockoutRisk.filter((r) => r.riskLevel === 'high').length * 5);
+    const healthScore = Math.max(0, Math.min(100, Math.round(healthScoreRaw)));
+
+    return {
+      providerUsed: ai.provider,
+      period,
+      windows,
+      summary: this.normalizeCurrencyText(String(parsed?.summary || '')),
+      trendNarrative: this.normalizeCurrencyText(String(parsed?.trendNarrative || '')),
+      priorityAction: this.normalizeCurrencyText(String(parsed?.priorityAction || '')),
+      kpiHealthScore: {
+        score: healthScore,
+        status: healthScore >= 80 ? 'healthy' : healthScore >= 60 ? 'watch' : 'critical',
+        reasons: Array.isArray(parsed?.kpiHealthReasons)
+          ? parsed.kpiHealthReasons.map((r: any) => this.normalizeCurrencyText(String(r)))
+          : [],
+      },
+      topSellingProducts: snapshot.topSellingProducts,
+      lowPerformingProducts: snapshot.lowPerformingProducts,
+      deadStockAlerts: (inventoryFinance?.deadStock || []).slice(0, 10),
+      stockoutRisk: snapshot.stockoutRisk,
+      reorderSuggestions: snapshot.reorderSuggestions,
+      paymentMethodInsights: paymentInsights,
+      snapshot,
+    };
+  }
+
+  async queryInventoryStockIntelligence(
+    shopId: string,
+    userId: string,
+    query: string,
+    period: 'daily' | 'weekly' | 'monthly' = 'weekly'
+  ) {
+    const intelligence = await this.getInventoryStockIntelligence(shopId, userId, period);
+    const prompt = `
+You are ShopKeeper inventory assistant.
+Answer only from this payload.
+Query: ${query}
+Payload:
+${JSON.stringify(intelligence?.snapshot || {}, null, 2)}
+
+Return concise, practical advice with bullets.
+Currency rules: Use GHS, not "$" or "USD".
+`;
+    const ai = await this.callOpenAiThenClaude(prompt);
+    return {
+      providerUsed: ai.provider,
+      period,
+      query,
+      answer: this.normalizeCurrencyText(ai.text),
+      basedOn: {
+        window: intelligence?.windows?.current,
+        health: intelligence?.kpiHealthScore,
+      },
+    };
+  }
+
+  private parseAiJson(content: string): any {
+    const raw = String(content || '').trim();
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw);
+    } catch {
+      const start = raw.indexOf('{');
+      const end = raw.lastIndexOf('}');
+      if (start >= 0 && end > start) {
+        try {
+          return JSON.parse(raw.slice(start, end + 1));
+        } catch {
+          return null;
+        }
+      }
+      return null;
+    }
+  }
+
+  private dateOnly(dt: Date) {
+    return dt.toISOString().slice(0, 10);
+  }
+
+  private getDefaultRangeForIntent(intent: string) {
+    const now = new Date();
+    const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    const sevenDaysAgo = new Date(today);
+    sevenDaysAgo.setUTCDate(today.getUTCDate() - 6);
+    const monthStart = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
+    const quarterStartMonth = Math.floor(today.getUTCMonth() / 3) * 3;
+    const quarterStart = new Date(Date.UTC(today.getUTCFullYear(), quarterStartMonth, 1));
+
+    if (intent === 'inventory_finance') {
+      return { startDate: this.dateOnly(monthStart), endDate: this.dateOnly(today) };
+    }
+    if (intent === 'expenses_profit') {
+      return { startDate: this.dateOnly(monthStart), endDate: this.dateOnly(today) };
+    }
+    if (intent === 'compliance_export') {
+      return { startDate: this.dateOnly(quarterStart), endDate: this.dateOnly(today) };
+    }
+    return { startDate: this.dateOnly(sevenDaysAgo), endDate: this.dateOnly(today) };
+  }
+
+  private async callGeminiText(prompt: string): Promise<string> {
+    if (!env.geminiApiKey) throw new Error('GEMINI_API_KEY not configured');
+    const model = env.geminiModel || 'gemini-2.0-flash';
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(env.geminiApiKey)}`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig: {
+          temperature: 0.2,
+          topP: 0.9,
+          maxOutputTokens: 1200,
+        },
+      }),
+    });
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => '');
+      throw new Error(`Gemini failed (${response.status}): ${errorText.slice(0, 300)}`);
+    }
+    const data: any = await response.json();
+    const parts = data?.candidates?.[0]?.content?.parts || [];
+    const text = parts.map((p: any) => String(p?.text || '')).join('\n').trim();
+    if (!text) throw new Error('Gemini returned empty content');
+    return text;
+  }
+
+  private async callOpenAiText(prompt: string): Promise<string> {
+    if (!env.openaiApiKey) throw new Error('OPENAI_API_KEY not configured');
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${env.openaiApiKey}`,
+      },
+      body: JSON.stringify({
+        model: env.openaiModel || 'gpt-4o-mini',
+        temperature: 0.2,
+        messages: [
+          { role: 'system', content: 'You are a finance and retail analytics assistant. Return concise, accurate outputs.' },
+          { role: 'user', content: prompt },
+        ],
+      }),
+    });
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => '');
+      throw new Error(`OpenAI failed (${response.status}): ${errorText.slice(0, 300)}`);
+    }
+    const data: any = await response.json();
+    const text = String(data?.choices?.[0]?.message?.content || '').trim();
+    if (!text) throw new Error('OpenAI returned empty content');
+    return text;
+  }
+
+  private async callClaudeText(prompt: string): Promise<string> {
+    if (!env.claudeApiKey) throw new Error('CLAUDE_API_KEY not configured');
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': env.claudeApiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: env.claudeModel || 'claude-3-5-sonnet-latest',
+        max_tokens: 900,
+        temperature: 0.2,
+        system: 'You are a business intelligence assistant for retail. Be concise and data-grounded.',
+        messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }],
+      }),
+    });
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => '');
+      throw new Error(`Claude failed (${response.status}): ${errorText.slice(0, 300)}`);
+    }
+    const data: any = await response.json();
+    const textBlock = Array.isArray(data?.content) ? data.content.find((b: any) => b?.type === 'text') : null;
+    const text = String(textBlock?.text || '').trim();
+    if (!text) throw new Error('Claude returned empty content');
+    return text;
+  }
+
+  private async callOpenAiThenClaude(prompt: string) {
+    try {
+      const text = await this.callOpenAiText(prompt);
+      return { provider: 'openai' as const, text };
+    } catch (openErr: any) {
+      logger.warn('OpenAI BI call failed; trying Claude fallback', { message: String(openErr?.message || openErr) });
+      const text = await this.callClaudeText(prompt);
+      return { provider: 'claude' as const, text };
+    }
+  }
+
+  private async parseIntentWithAi(query: string) {
+    const range = this.getDefaultRangeForIntent('dashboard');
+    const prompt = `
+You convert retail report questions into strict JSON.
+Return JSON only:
+{
+  "intent": "dashboard" | "sales_intelligence" | "inventory_finance" | "expenses_profit" | "compliance_export",
+  "language": "en" | "twi",
+  "startDate": "YYYY-MM-DD" | null,
+  "endDate": "YYYY-MM-DD" | null,
+  "deadStockDays": number | null,
+  "reason": string
+}
+
+Rules:
+- If question is in Twi or requests Twi, set language=twi.
+- If no date range is explicit, use ${range.startDate} to ${range.endDate}.
+- inventory finance -> include deadStockDays (default 30).
+- Keep reason short.
+
+Question: ${query}
+`;
+
+    let provider: 'gemini' | 'openai' | null = null;
+    let raw = '';
+    const errors: string[] = [];
+    try {
+      raw = await this.callGeminiText(prompt);
+      provider = 'gemini';
+    } catch (err: any) {
+      errors.push(String(err?.message || err));
+      raw = await this.callOpenAiText(prompt);
+      provider = 'openai';
+    }
+    const parsed = this.parseAiJson(raw);
+    if (!parsed) {
+      throw new Error(`Failed to parse AI intent JSON (${provider || 'none'}). ${errors.join(' | ')}`);
+    }
+    return { provider, parsed };
+  }
+
+  private heuristicIntent(query: string) {
+    const q = query.toLowerCase();
+    let intent: 'dashboard' | 'sales_intelligence' | 'inventory_finance' | 'expenses_profit' | 'compliance_export' = 'dashboard';
+    if (q.includes('inventory') || q.includes('stock') || q.includes('dead stock')) intent = 'inventory_finance';
+    else if (q.includes('expense') || q.includes('profit') || q.includes('loss') || q.includes('p&l')) intent = 'expenses_profit';
+    else if (q.includes('tax') || q.includes('compliance')) intent = 'compliance_export';
+    else if (q.includes('payment') || q.includes('peak') || q.includes('staff')) intent = 'sales_intelligence';
+    const language: 'en' | 'twi' = q.includes('twi') ? 'twi' : 'en';
+    const range = this.getDefaultRangeForIntent(intent);
+    return {
+      intent,
+      language,
+      startDate: range.startDate,
+      endDate: range.endDate,
+      deadStockDays: 30,
+      reason: 'Fallback heuristic intent.',
+    };
+  }
+
+  private buildSnapshot(intent: string, data: any) {
+    if (intent === 'dashboard') {
+      return {
+        totalSales: Number(data?.totalSales || 0),
+        totalExpenses: Number(data?.totalExpenses || 0),
+        profit: Number(data?.profit || 0),
+        transactions: Number(data?.totalTransactions || 0),
+        lowStockCount: Number(data?.lowStockCount || 0),
+      };
+    }
+    if (intent === 'sales_intelligence') {
+      return {
+        topProducts: (data?.topProducts || []).slice(0, 5),
+        peakHours: (data?.peakHours || []).slice(0, 3),
+        paymentMethodBreakdown: data?.paymentMethodBreakdown || {},
+        dailyComparison: data?.dailyComparison || {},
+      };
+    }
+    if (intent === 'inventory_finance') {
+      return {
+        totalStockValue: Number(data?.totalStockValue || 0),
+        potentialRevenue: Number(data?.potentialRevenue || 0),
+        potentialProfit: Number(data?.potentialProfit || 0),
+        lowStockCount: Number((data?.lowStock || []).length),
+        deadStockCount: Number((data?.deadStock || []).length),
+      };
+    }
+    if (intent === 'expenses_profit') {
+      return {
+        totalRevenue: Number(data?.totalRevenue || 0),
+        salesProfit: Number(data?.salesProfit || 0),
+        totalExpenses: Number(data?.totalExpenses || 0),
+        netProfit: Number(data?.netProfit || 0),
+        topExpenseCategories: (data?.expensesByCategory || []).slice(0, 5),
+      };
+    }
+    return {
+      periodLabel: data?.periodLabel,
+      totalSales: Number(data?.totalSales || 0),
+      totalExpenses: Number(data?.totalExpenses || 0),
+      profit: Number(data?.profit || 0),
+      totalTransactions: Number(data?.totalTransactions || 0),
+    };
+  }
+
+  private async summarizeWithAi(
+    query: string,
+    language: 'en' | 'twi',
+    intent: string,
+    snapshot: any
+  ) {
+    const langInstruction = language === 'twi'
+      ? 'Respond in natural Ghanaian Twi. Keep numerals as-is.'
+      : 'Respond in clear English.';
+    const prompt = `
+You are ShopKeeper owner copilot.
+${langInstruction}
+Answer the owner question using only the report snapshot.
+Keep answer practical and concise:
+- one headline insight
+- 3 bullet takeaways
+- one recommended next action
+
+Owner question: ${query}
+Intent: ${intent}
+Snapshot JSON:
+${JSON.stringify(snapshot, null, 2)}
+`;
+
+    try {
+      const answer = await this.callGeminiText(prompt);
+      return { provider: 'gemini', answer };
+    } catch (geminiErr: any) {
+      logger.warn('Gemini summary failed; using OpenAI fallback', { message: String(geminiErr?.message || geminiErr) });
+      const answer = await this.callOpenAiText(prompt);
+      return { provider: 'openai', answer };
+    }
+  }
+
+  async getNaturalLanguageReport(
+    shopId: string,
+    _userId: string,
+    query: string,
+    requestedLanguage: 'en' | 'twi' | 'auto' = 'auto'
+  ) {
+    const cleanQuery = String(query || '').trim();
+    if (!cleanQuery) throw new Error('query is required');
+
+    let intentResult: any;
+    let intentProvider: 'gemini' | 'openai' | 'heuristic' = 'heuristic';
+    try {
+      const ai = await this.parseIntentWithAi(cleanQuery);
+      intentResult = ai.parsed;
+      intentProvider = (ai.provider || 'openai') as 'gemini' | 'openai';
+    } catch (err: any) {
+      logger.warn('AI intent parsing failed; using heuristic', { message: String(err?.message || err) });
+      intentResult = this.heuristicIntent(cleanQuery);
+      intentProvider = 'heuristic';
+    }
+
+    const intent = String(intentResult?.intent || 'dashboard') as
+      | 'dashboard'
+      | 'sales_intelligence'
+      | 'inventory_finance'
+      | 'expenses_profit'
+      | 'compliance_export';
+    const defaults = this.getDefaultRangeForIntent(intent);
+    const startDate = String(intentResult?.startDate || defaults.startDate);
+    const endDate = String(intentResult?.endDate || defaults.endDate);
+    const inferredLanguage: 'en' | 'twi' =
+      String(intentResult?.language || 'en').toLowerCase() === 'twi' ? 'twi' : 'en';
+    const language: 'en' | 'twi' =
+      requestedLanguage === 'auto'
+        ? inferredLanguage
+        : requestedLanguage === 'twi'
+          ? 'twi'
+          : 'en';
+    const deadStockDays = Number(intentResult?.deadStockDays || 30);
+
+    let rawData: any;
+    let periodLabel = `${startDate} to ${endDate}`;
+
+    if (intent === 'sales_intelligence') {
+      rawData = await this.getSalesIntelligence(shopId, startDate, endDate);
+      periodLabel = `Sales intelligence (${startDate} to ${endDate})`;
+    } else if (intent === 'inventory_finance') {
+      rawData = await this.getInventoryFinance(shopId, Number.isFinite(deadStockDays) ? deadStockDays : 30);
+      periodLabel = `Inventory finance (dead stock ${deadStockDays || 30} days)`;
+    } else if (intent === 'expenses_profit') {
+      rawData = await this.getExpensesProfitReport(shopId, startDate, endDate);
+      periodLabel = `Expenses & profit (${startDate} to ${endDate})`;
+    } else if (intent === 'compliance_export') {
+      rawData = await this.getComplianceExport(shopId, 'tax', { startDate, endDate });
+      periodLabel = String(rawData?.periodLabel || `Compliance (${startDate} to ${endDate})`);
+    } else {
+      rawData = await this.getDashboardStats(shopId, startDate, endDate);
+      periodLabel = `Dashboard summary (${startDate} to ${endDate})`;
+    }
+
+    const snapshot = this.buildSnapshot(intent, rawData);
+    const summary = await this.summarizeWithAi(cleanQuery, language, intent, snapshot);
+
+    const chartReferences =
+      intent === 'sales_intelligence'
+        ? {
+            key: 'recentDailyMetrics',
+            title: 'Revenue/Expenses/Profit trend',
+            points: (rawData?.recentDailyMetrics || []).slice(-14).map((d: any) => ({
+              x: String(d?.date || ''),
+              revenue: Number(d?.revenue || 0),
+              expenses: Number(d?.expenses || 0),
+              profit: Number(d?.profit || 0),
+            })),
+          }
+        : intent === 'expenses_profit'
+          ? {
+              key: 'dailyNetProfit',
+              title: 'Daily net profit trend',
+              points: (rawData?.dailyNetProfit || []).slice(-14).map((d: any) => ({
+                x: String(d?.date || ''),
+                revenue: Number(d?.revenue || 0),
+                expenses: Number(d?.expenses || 0),
+                profit: Number(d?.profit || 0),
+              })),
+            }
+          : intent === 'inventory_finance'
+            ? {
+                key: 'stockRisk',
+                title: 'Low/dead stock risk list',
+                points: [
+                  { label: 'lowStockCount', value: Number((rawData?.lowStock || []).length) },
+                  { label: 'deadStockCount', value: Number((rawData?.deadStock || []).length) },
+                ],
+              }
+            : {
+                key: 'kpis',
+                title: 'KPI snapshot',
+                points: [
+                  { label: 'totalSales', value: Number(snapshot?.totalSales || 0) },
+                  { label: 'totalExpenses', value: Number(snapshot?.totalExpenses || 0) },
+                  { label: 'profit', value: Number(snapshot?.profit || 0) },
+                ],
+              };
+
+    return {
+      intent,
+      language,
+      periodLabel,
+      providerUsed: summary.provider,
+      intentProvider,
+      answer: summary.answer,
+      snapshot,
+      chartReferences,
+      sourceRange: { startDate, endDate },
     };
   }
 }
