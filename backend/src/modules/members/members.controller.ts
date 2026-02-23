@@ -109,4 +109,51 @@ export class MembersController {
       errorHandler(error as AppError, req, res, next);
     }
   }
+
+  async getCreditIntelligence(req: ShopRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.shopId) {
+        throw new AppError('Shop ID is required', 400);
+      }
+      const lookbackDays = req.query.lookbackDays ? Number(req.query.lookbackDays) : 90;
+      const data = await membersService.getCreditIntelligence(req.shopId, lookbackDays);
+      res.json({ success: true, data });
+    } catch (error) {
+      errorHandler(error as AppError, req, res, next);
+    }
+  }
+
+  async queryCreditIntelligence(req: ShopRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.shopId) {
+        throw new AppError('Shop ID is required', 400);
+      }
+      const query = String(req.body?.query || '').trim();
+      if (!query) throw new AppError('query is required', 400);
+      const lookbackDays = req.body?.lookbackDays != null ? Number(req.body.lookbackDays) : 90;
+      const data = await membersService.queryCreditIntelligence(req.shopId, query, lookbackDays);
+      res.json({ success: true, data });
+    } catch (error) {
+      errorHandler(error as AppError, req, res, next);
+    }
+  }
+
+  async runAutoCreditReminders(req: ShopRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.shopId || !req.userId) {
+        throw new AppError('Shop ID and User ID are required', 400);
+      }
+      const intervalDays = req.body?.intervalDays != null ? Number(req.body.intervalDays) : 3;
+      const lookbackDays = req.body?.lookbackDays != null ? Number(req.body.lookbackDays) : 90;
+      const data = await membersService.runAutoCreditReminders(
+        req.shopId,
+        req.userId,
+        intervalDays,
+        lookbackDays
+      );
+      res.json({ success: true, data });
+    } catch (error) {
+      errorHandler(error as AppError, req, res, next);
+    }
+  }
 }

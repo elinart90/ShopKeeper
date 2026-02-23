@@ -7,17 +7,24 @@ let transporter: nodemailer.Transporter | null = null;
 function getTransporter(): nodemailer.Transporter | null {
   if (transporter) return transporter;
   const { email } = env;
-  if (!email.user || !email.password) {
+  const normalizedUser = String(email.user || '').trim();
+  let normalizedPassword = String(email.password || '').trim();
+  // Gmail app passwords are often copied with spaces every 4 chars.
+  if (/gmail\.com/i.test(String(email.host || ''))) {
+    normalizedPassword = normalizedPassword.replace(/\s+/g, '');
+  }
+
+  if (!normalizedUser || !normalizedPassword) {
     logger.warn('Email not configured (EMAIL_USER/EMAIL_PASSWORD missing). PIN emails will not be sent.');
     return null;
   }
   transporter = nodemailer.createTransport({
-    host: email.host,
-    port: email.port,
+    host: String(email.host || '').trim(),
+    port: Number(email.port || 587),
     secure: email.secure,
     auth: {
-      user: email.user,
-      pass: email.password,
+      user: normalizedUser,
+      pass: normalizedPassword,
     },
   });
   return transporter;
@@ -71,6 +78,32 @@ export async function sendClearDataPinEmail(to: string, pin: string): Promise<bo
     return true;
   } catch (err) {
     logger.error('Failed to send PIN email:', err);
+    return false;
+  }
+}
+
+/**
+ * Generic email helper for operational notifications.
+ */
+export async function sendGenericEmail(params: {
+  to: string;
+  subject: string;
+  text: string;
+  html?: string;
+}): Promise<boolean> {
+  const transport = getTransporter();
+  if (!transport) return false;
+  try {
+    await transport.sendMail({
+      from: env.email.from,
+      to: params.to,
+      subject: params.subject,
+      text: params.text,
+      html: params.html || `<pre style="font-family:inherit;white-space:pre-wrap;">${params.text}</pre>`,
+    });
+    return true;
+  } catch (err) {
+    logger.error('Failed to send generic email:', err);
     return false;
   }
 }

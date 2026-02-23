@@ -21,9 +21,7 @@ export class SubscriptionsController {
   async getStatus(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       if (!req.userId) throw createHttpError('Unauthorized', 401);
-      const shopIdHeader = req.headers['x-shop-id'];
-      const shopId = typeof shopIdHeader === 'string' ? shopIdHeader : undefined;
-      const status = await service.getStatus(req.userId, shopId);
+      const status = await service.getStatus(req.userId);
       res.json({ success: true, data: status });
     } catch (error) {
       errorHandler(error as Error, req, res, next);

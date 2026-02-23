@@ -40,6 +40,9 @@ import type {
   InventoryStockIntelligenceData,
   InventoryStockIntelligenceQueryData,
   PurchasePlanDraft,
+  CommunicationDispatchData,
+  RiskFraudInsightsData,
+  RiskFraudQueryData,
 } from "../../../lib/api";
 import toast from "react-hot-toast";
 import CreditTab from "../components/CreditTab";
@@ -48,7 +51,7 @@ const TABS = [
   { id: "overview", label: "Overview", icon: BarChart3 },
   { id: "money-flow", label: "Money Flow", icon: Wallet, ownerOnly: true },
   { id: "inventory-finance", label: "Inventory Finance", icon: Package, ownerOnly: true },
-  { id: "expenses", label: "Expenses & Profit", icon: PieChart },
+  { id: "expenses", label: "Expenses & Profit", icon: PieChart, ownerOnly: true },
   { id: "staff", label: "Staff & Controls", icon: Users, ownerOnly: true },
   { id: "credit", label: "Credit & Risk", icon: CreditCard },
   { id: "reports", label: "Reports", icon: FileText, ownerOnly: true },
@@ -58,7 +61,7 @@ const TABS = [
 
 type TabId = (typeof TABS)[number]["id"];
 
-const OWNER_ONLY_TAB_IDS: TabId[] = ["money-flow", "inventory-finance", "staff", "reports"];
+const OWNER_ONLY_TAB_IDS: TabId[] = ["money-flow", "inventory-finance", "expenses", "staff", "reports", "dashboard-edit"];
 
 type SpeechRecognitionLike = {
   continuous: boolean;
@@ -1937,10 +1940,22 @@ function StaffTab({
   const [loadingDiscrepancies, setLoadingDiscrepancies] = useState(false);
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
   const [loadingAuditLogs, setLoadingAuditLogs] = useState(false);
+  const [stockVariances, setStockVariances] = useState<any[]>([]);
+  const [loadingStockVariances, setLoadingStockVariances] = useState(false);
+  const [auditFilterLabel, setAuditFilterLabel] = useState("");
+  const [riskFraud, setRiskFraud] = useState<RiskFraudInsightsData | null>(null);
+  const [riskFraudLoading, setRiskFraudLoading] = useState(false);
+  const [riskLookbackDays, setRiskLookbackDays] = useState(30);
+  const [riskQuery, setRiskQuery] = useState("");
+  const [riskQueryLoading, setRiskQueryLoading] = useState(false);
+  const [riskQueryResult, setRiskQueryResult] = useState<RiskFraudQueryData | null>(null);
   const [selectedPermissionUserId, setSelectedPermissionUserId] = useState("");
   const [permissionsDraft, setPermissionsDraft] = useState<Record<string, boolean>>({});
   const [loadingPermissions, setLoadingPermissions] = useState(false);
   const [savingPermissions, setSavingPermissions] = useState(false);
+  const discrepancySectionRef = useRef<HTMLDivElement | null>(null);
+  const varianceSectionRef = useRef<HTMLDivElement | null>(null);
+  const auditSectionRef = useRef<HTMLDivElement | null>(null);
 
   const isOwner = currentShop?.role === "owner";
 
@@ -1996,6 +2011,7 @@ function StaffTab({
     try {
       const res = await controlsApi.getAuditLogs({ limit: 80 });
       setAuditLogs(res.data.data || []);
+      setAuditFilterLabel("");
     } catch (e: any) {
       toast.error(e?.response?.data?.error?.message || "Failed to load action logs");
       setAuditLogs([]);
@@ -2004,13 +2020,48 @@ function StaffTab({
     }
   };
 
+  const loadStockVariances = async () => {
+    if (!isOwner) return;
+    setLoadingStockVariances(true);
+    try {
+      const res = await controlsApi.getStockVariances({ limit: 100 });
+      setStockVariances(res.data.data || []);
+    } catch (e: any) {
+      toast.error(e?.response?.data?.error?.message || "Failed to load stock variances");
+      setStockVariances([]);
+    } finally {
+      setLoadingStockVariances(false);
+    }
+  };
+
+  const loadRiskFraud = async () => {
+    if (!isOwner) return;
+    setRiskFraudLoading(true);
+    try {
+      const res = await controlsApi.getRiskFraudInsights({ lookbackDays: riskLookbackDays });
+      setRiskFraud(res.data.data || null);
+    } catch (e: any) {
+      toast.error(e?.response?.data?.error?.message || "Failed to load risk & fraud insights");
+      setRiskFraud(null);
+    } finally {
+      setRiskFraudLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (isOwner && currentShop?.id) {
       loadShifts();
       loadDiscrepancies();
+      loadStockVariances();
       loadAuditLogs();
     }
   }, [isOwner, currentShop?.id]);
+
+  useEffect(() => {
+    if (isOwner && currentShop?.id) {
+      loadRiskFraud();
+    }
+  }, [isOwner, currentShop?.id, riskLookbackDays]);
 
   const handleRevoke = async (userId: string, name: string) => {
     if (!confirm(`Revoke access for ${name}? They will no longer be able to use this shop.`)) return;
@@ -2127,6 +2178,86 @@ function StaffTab({
     }
   };
 
+  const scrollToSection = (ref: { current: HTMLDivElement | null }) => {
+    setTimeout(() => {
+      ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 100);
+  };
+
+  const handleInvestigateOpenDiscrepancies = async () => {
+    if (!isOwner) return;
+    setLoadingDiscrepancies(true);
+    try {
+      const res = await controlsApi.getDiscrepancies({ status: "open" });
+      setDiscrepancies(res.data.data || []);
+      toast.success("Showing open discrepancies");
+      scrollToSection(discrepancySectionRef);
+    } catch (e: any) {
+      toast.error(e?.response?.data?.error?.message || "Failed to load open discrepancies");
+    } finally {
+      setLoadingDiscrepancies(false);
+    }
+  };
+
+  const handleInvestigateSevereVariances = async () => {
+    await loadStockVariances();
+    toast.success("Showing severe/critical stock variances");
+    scrollToSection(varianceSectionRef);
+  };
+
+  const handleInvestigateTopCashier = async () => {
+    const userId = riskFraud?.cashierOutliers?.[0]?.userId;
+    if (!userId) {
+      toast.error("No cashier outlier found in this window");
+      return;
+    }
+    setLoadingAuditLogs(true);
+    try {
+      const res = await controlsApi.getAuditLogs({ userId, limit: 80 });
+      setAuditLogs(res.data.data || []);
+      const name = membersById[userId]?.name || userId.slice(0, 8);
+      setAuditFilterLabel(`Filtered by cashier: ${name}`);
+      toast.success("Loaded cashier-focused audit logs");
+      scrollToSection(auditSectionRef);
+    } catch (e: any) {
+      toast.error(e?.response?.data?.error?.message || "Failed to load cashier audit logs");
+    } finally {
+      setLoadingAuditLogs(false);
+    }
+  };
+
+  const getAlertActionLabel = (type: string) => {
+    const t = String(type || "");
+    if (t.includes("cash_discrepancies")) return "Open discrepancies";
+    if (t.includes("variance") || t.includes("shortage") || t.includes("month_spike")) return "Review variances";
+    if (t.includes("cashier") || t.includes("friday_night")) return "Focus cashier logs";
+    if (t.includes("cash_sales") || t.includes("cancel")) return "Refresh risk data";
+    return "Investigate";
+  };
+
+  const handleAlertSmartAction = async (alertType: string) => {
+    const t = String(alertType || "");
+    if (t.includes("cash_discrepancies")) {
+      await handleInvestigateOpenDiscrepancies();
+      return;
+    }
+    if (t.includes("variance") || t.includes("shortage") || t.includes("month_spike")) {
+      await handleInvestigateSevereVariances();
+      return;
+    }
+    if (t.includes("cashier") || t.includes("friday_night")) {
+      await handleInvestigateTopCashier();
+      return;
+    }
+    if (t.includes("cash_sales") || t.includes("cancel")) {
+      await loadRiskFraud();
+      toast.success("Risk data refreshed");
+      return;
+    }
+    await loadRiskFraud();
+    toast.success("Investigation context refreshed");
+  };
+
   const handleLoadPermissions = async (userId: string) => {
     setSelectedPermissionUserId(userId);
     const target = members.find((m: any) => m.user_id === userId);
@@ -2164,6 +2295,22 @@ function StaffTab({
     }
   };
 
+  const handleAskRiskFraud = async () => {
+    if (!riskQuery.trim()) return;
+    setRiskQueryLoading(true);
+    try {
+      const res = await controlsApi.queryRiskFraudInsights({
+        query: riskQuery.trim(),
+        lookbackDays: riskLookbackDays,
+      });
+      setRiskQueryResult(res.data.data || null);
+    } catch (e: any) {
+      toast.error(e?.response?.data?.error?.message || "Failed to run risk query");
+    } finally {
+      setRiskQueryLoading(false);
+    }
+  };
+
   const salesByStaff = intelligence?.salesByStaff ?? [];
   const membersById = members.reduce((acc: Record<string, any>, m) => {
     acc[m.user_id] = m;
@@ -2192,6 +2339,149 @@ function StaffTab({
         <p className="text-sm text-gray-500 dark:text-gray-400">
           You are the owner. Add staff, assign roles (manager, cashier, staff), and control access.
         </p>
+      </div>
+
+      {/* Risk & Fraud detection */}
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-4 border border-gray-200 dark:border-gray-700 space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-lg font-medium text-gray-900 dark:text-white">Risk & Fraud Detection</h3>
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-gray-500">Window</label>
+            <select
+              value={riskLookbackDays}
+              onChange={(e) => setRiskLookbackDays(Number(e.target.value))}
+              className="rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-2 py-1 text-sm"
+            >
+              <option value={7}>7 days</option>
+              <option value={30}>30 days</option>
+              <option value={60}>60 days</option>
+              <option value={90}>90 days</option>
+            </select>
+            <button
+              onClick={loadRiskFraud}
+              className="px-3 py-1 rounded bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-sm"
+            >
+              Refresh
+            </button>
+          </div>
+        </div>
+
+        {riskFraudLoading && !riskFraud ? (
+          <p className="text-sm text-gray-500 dark:text-gray-400">Loading risk insights...</p>
+        ) : riskFraud ? (
+          <>
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+              <div className="rounded-lg bg-gray-50 dark:bg-gray-700/40 p-3">
+                <p className="text-xs text-gray-500 dark:text-gray-400">Risk score</p>
+                <p className="text-xl font-bold text-gray-900 dark:text-white">{riskFraud.riskScore}/100</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400 capitalize">{riskFraud.riskStatus}</p>
+              </div>
+              <div className="rounded-lg bg-red-50 dark:bg-red-900/20 p-3">
+                <p className="text-xs text-red-600 dark:text-red-300">Critical alerts</p>
+                <p className="text-xl font-bold text-red-700 dark:text-red-300">{riskFraud.counts.critical}</p>
+              </div>
+              <div className="rounded-lg bg-amber-50 dark:bg-amber-900/20 p-3">
+                <p className="text-xs text-amber-700 dark:text-amber-300">Warnings</p>
+                <p className="text-xl font-bold text-amber-700 dark:text-amber-300">{riskFraud.counts.warning}</p>
+              </div>
+              <div className="rounded-lg bg-gray-50 dark:bg-gray-700/40 p-3">
+                <p className="text-xs text-gray-500 dark:text-gray-400">Open discrepancies</p>
+                <p className="text-xl font-bold text-gray-900 dark:text-white">{riskFraud.unresolvedDiscrepancies}</p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={handleInvestigateOpenDiscrepancies}
+                className="px-3 py-1.5 rounded-lg border border-amber-500 text-amber-700 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-900/20 text-sm"
+              >
+                Investigate open discrepancies
+              </button>
+              <button
+                onClick={handleInvestigateSevereVariances}
+                className="px-3 py-1.5 rounded-lg border border-red-500 text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-900/20 text-sm"
+              >
+                Review severe variances
+              </button>
+              <button
+                onClick={handleInvestigateTopCashier}
+                className="px-3 py-1.5 rounded-lg border border-gray-400 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 text-sm"
+              >
+                Focus top cashier logs
+              </button>
+            </div>
+
+            <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-3 text-sm whitespace-pre-wrap text-gray-800 dark:text-gray-200">
+              {riskFraud.aiSummary}
+            </div>
+
+            {riskFraud.alerts.length > 0 && (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-gray-500 dark:text-gray-400 border-b">
+                      <th className="pb-2">Severity</th>
+                      <th className="pb-2">Alert</th>
+                      <th className="pb-2 text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {riskFraud.alerts.slice(0, 10).map((a, idx) => (
+                      <tr key={`${a.type}-${idx}`} className="border-b border-gray-100 dark:border-gray-700">
+                        <td className="py-2 pr-3">
+                          <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium capitalize ${
+                            a.severity === "critical"
+                              ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300"
+                              : a.severity === "warning"
+                                ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300"
+                                : "bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300"
+                          }`}>
+                            {a.severity}
+                          </span>
+                        </td>
+                        <td className="py-2">{a.message}</td>
+                        <td className="py-2 text-right">
+                          <button
+                            onClick={() => handleAlertSmartAction(a.type)}
+                            className="px-2.5 py-1 rounded border border-gray-300 dark:border-gray-600 text-xs hover:bg-gray-50 dark:hover:bg-gray-700"
+                          >
+                            {getAlertActionLabel(a.type)}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <p className="text-sm font-medium text-gray-900 dark:text-white">Ask Risk AI</p>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <input
+                  value={riskQuery}
+                  onChange={(e) => setRiskQuery(e.target.value)}
+                  placeholder='e.g. Which alert should I investigate first?'
+                  className="flex-1 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm"
+                />
+                <button
+                  onClick={handleAskRiskFraud}
+                  disabled={riskQueryLoading || !riskQuery.trim()}
+                  className="px-4 py-2 rounded-lg btn-primary-gradient disabled:opacity-60"
+                >
+                  {riskQueryLoading ? "Asking..." : "Ask"}
+                </button>
+              </div>
+              {riskQueryResult?.answer && (
+                <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-3 text-sm whitespace-pre-wrap text-gray-800 dark:text-gray-200">
+                  {riskQueryResult.answer}
+                </div>
+              )}
+            </div>
+          </>
+        ) : (
+          <p className="text-sm text-gray-500 dark:text-gray-400">No risk insights available yet.</p>
+        )}
       </div>
 
       {/* Add staff */}
@@ -2415,6 +2705,7 @@ function StaffTab({
             onClick={() => {
               loadShifts();
               loadDiscrepancies();
+              loadStockVariances();
             }}
             className="px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-sm hover:bg-gray-50 dark:hover:bg-gray-700"
           >
@@ -2457,7 +2748,9 @@ function StaffTab({
           </div>
         )}
 
-        <h4 className="text-md font-medium text-gray-900 dark:text-white">Cash discrepancies</h4>
+        <div ref={discrepancySectionRef}>
+          <h4 className="text-md font-medium text-gray-900 dark:text-white">Cash discrepancies</h4>
+        </div>
         {loadingDiscrepancies ? (
           <p className="text-sm text-gray-500 dark:text-gray-400">Loading discrepancies...</p>
         ) : discrepancies.length === 0 ? (
@@ -2487,6 +2780,39 @@ function StaffTab({
               </div>
             ))}
           </div>
+        )}
+
+        <div ref={varianceSectionRef}>
+          <h4 className="text-md font-medium text-gray-900 dark:text-white mt-4">Severe stock variances</h4>
+        </div>
+        {loadingStockVariances ? (
+          <p className="text-sm text-gray-500 dark:text-gray-400">Loading stock variances...</p>
+        ) : (
+          (() => {
+            const severeRows = (stockVariances || [])
+              .filter((v: any) => ["critical", "severe"].includes(String(v.severity || "")))
+              .slice(0, 10);
+            if (severeRows.length === 0) {
+              return <p className="text-sm text-gray-500 dark:text-gray-400">No severe stock variance cases in this window.</p>;
+            }
+            return (
+              <div className="space-y-2">
+                {severeRows.map((v: any) => (
+                  <div key={v.id} className="rounded-lg border border-gray-200 dark:border-gray-700 p-3 flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <p className="font-medium text-red-600 dark:text-red-300">
+                        {v.product_name || "Unknown product"} ({v.severity})
+                      </p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        Value impact: {currency} {Number(v.variance_value || 0).toFixed(2)} - {new Date(v.created_at).toLocaleString()}
+                      </p>
+                    </div>
+                    <span className="text-xs text-gray-500 dark:text-gray-400 capitalize">{v.status}</span>
+                  </div>
+                ))}
+              </div>
+            );
+          })()
         )}
       </div>
 
@@ -2543,16 +2869,29 @@ function StaffTab({
       </div>
 
       {/* Action logs */}
-      <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-4 border border-gray-200 dark:border-gray-700">
+      <div ref={auditSectionRef} className="bg-white dark:bg-gray-800 rounded-xl shadow p-4 border border-gray-200 dark:border-gray-700">
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-lg font-medium text-gray-900 dark:text-white">Action logs</h3>
-          <button
-            onClick={loadAuditLogs}
-            className="px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 text-sm"
-          >
-            Refresh
-          </button>
+          <div className="flex items-center gap-2">
+            {auditFilterLabel && (
+              <button
+                onClick={loadAuditLogs}
+                className="px-3 py-1.5 rounded-lg border border-amber-500 text-amber-700 dark:text-amber-300 text-xs"
+              >
+                Clear filter
+              </button>
+            )}
+            <button
+              onClick={loadAuditLogs}
+              className="px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 text-sm"
+            >
+              Refresh
+            </button>
+          </div>
         </div>
+        {auditFilterLabel && (
+          <p className="text-xs text-amber-700 dark:text-amber-300 mb-2">{auditFilterLabel}</p>
+        )}
         {loadingAuditLogs ? (
           <p className="text-sm text-gray-500 dark:text-gray-400">Loading action logs...</p>
         ) : auditLogs.length === 0 ? (
@@ -2621,6 +2960,8 @@ function ReportsTab() {
   const [biQuery, setBiQuery] = useState("");
   const [biQueryLoading, setBiQueryLoading] = useState(false);
   const [biQueryResult, setBiQueryResult] = useState<BusinessIntelligenceQueryData | null>(null);
+  const [commsLoading, setCommsLoading] = useState(false);
+  const [commsResult, setCommsResult] = useState<CommunicationDispatchData | null>(null);
   const [isListening, setIsListening] = useState(false);
   const [speechSupported, setSpeechSupported] = useState(false);
   const printRef = useRef<HTMLDivElement>(null);
@@ -2722,6 +3063,44 @@ function ReportsTab() {
       setBiQueryResult(null);
     } finally {
       setBiQueryLoading(false);
+    }
+  };
+
+  const copyText = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success("Copied");
+    } catch {
+      toast.error("Could not copy");
+    }
+  };
+
+  const runCommsAction = async (
+    type: "daily" | "credit" | "supplier" | "risk"
+  ) => {
+    setCommsLoading(true);
+    try {
+      if (type === "daily") {
+        const res = await controlsApi.dispatchDailyOwnerSummary({ channels: ["email", "whatsapp"], period: "daily" });
+        setCommsResult(res.data?.data || null);
+        toast.success("Daily owner summary prepared");
+      } else if (type === "credit") {
+        const res = await controlsApi.dispatchCreditReminders({ channels: ["whatsapp", "sms"], intervalDays: 3, lookbackDays: 90 });
+        setCommsResult(res.data?.data || null);
+        toast.success("Credit reminders prepared");
+      } else if (type === "supplier") {
+        const res = await controlsApi.dispatchSupplierReorder({ period: "weekly" });
+        setCommsResult(res.data?.data || null);
+        toast.success("Supplier reorder drafts prepared");
+      } else {
+        const res = await controlsApi.dispatchCriticalRiskAlerts({ channels: ["email", "whatsapp"], lookbackDays: 30 });
+        setCommsResult(res.data?.data || null);
+        toast.success("Critical risk alerts prepared");
+      }
+    } catch (e: any) {
+      toast.error(e?.response?.data?.error?.message || "Failed to run communication action");
+    } finally {
+      setCommsLoading(false);
     }
   };
 
@@ -3061,6 +3440,118 @@ function ReportsTab() {
         )}
       </div>
 
+      <div className="mb-6 rounded-lg border border-indigo-200 dark:border-indigo-700 bg-indigo-50/60 dark:bg-indigo-900/20 p-4 space-y-3">
+        <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Communication Layer (WhatsApp/SMS/Email)</h3>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2">
+          <button
+            type="button"
+            onClick={() => runCommsAction("daily")}
+            disabled={commsLoading}
+            className="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm disabled:opacity-60"
+          >
+            Daily owner summary
+          </button>
+          <button
+            type="button"
+            onClick={() => runCommsAction("credit")}
+            disabled={commsLoading}
+            className="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm disabled:opacity-60"
+          >
+            Credit reminders
+          </button>
+          <button
+            type="button"
+            onClick={() => runCommsAction("supplier")}
+            disabled={commsLoading}
+            className="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm disabled:opacity-60"
+          >
+            Supplier reorder drafts
+          </button>
+          <button
+            type="button"
+            onClick={() => runCommsAction("risk")}
+            disabled={commsLoading}
+            className="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm disabled:opacity-60"
+          >
+            Critical risk alerts
+          </button>
+          <div className="px-3 py-2 rounded-lg border border-emerald-200 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-900/20 text-xs text-emerald-700 dark:text-emerald-300">
+            PDF receipt sharing is already active in Sales.
+          </div>
+        </div>
+
+        {commsResult && (
+          <div className="rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 p-3 space-y-2 text-sm">
+            {commsResult.summary && (
+              <div>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Summary text</p>
+                <div className="whitespace-pre-wrap text-gray-800 dark:text-gray-100">{commsResult.summary}</div>
+              </div>
+            )}
+            {commsResult.message && (
+              <div>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Message</p>
+                <div className="whitespace-pre-wrap text-gray-800 dark:text-gray-100">{commsResult.message}</div>
+              </div>
+            )}
+            {(commsResult.whatsapp?.link || commsResult.sms?.text || commsResult.email?.to) && (
+              <div className="flex flex-wrap gap-2">
+                {commsResult.whatsapp?.link && (
+                  <a
+                    href={commsResult.whatsapp.link}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="px-2.5 py-1 rounded border border-emerald-500 text-emerald-700 dark:text-emerald-300 text-xs"
+                  >
+                    Open WhatsApp
+                  </a>
+                )}
+                {commsResult.sms?.text && (
+                  <button
+                    type="button"
+                    onClick={() => copyText(String(commsResult.sms?.text || ""))}
+                    className="px-2.5 py-1 rounded border border-gray-300 dark:border-gray-600 text-xs"
+                  >
+                    Copy SMS text
+                  </button>
+                )}
+                {commsResult.email?.to && (
+                  <span className="px-2.5 py-1 rounded border border-gray-300 dark:border-gray-600 text-xs text-gray-600 dark:text-gray-300">
+                    Email: {commsResult.email.to} {commsResult.email.sent ? "(sent)" : "(draft)"}
+                  </span>
+                )}
+              </div>
+            )}
+            {Array.isArray(commsResult.reminders) && commsResult.reminders.length > 0 && (
+              <div className="space-y-1">
+                <p className="text-xs text-gray-500 dark:text-gray-400">Reminder drafts ({commsResult.reminders.length})</p>
+                {commsResult.reminders.slice(0, 5).map((r) => (
+                  <div key={r.customerId} className="rounded border border-gray-200 dark:border-gray-700 p-2">
+                    <p className="text-xs font-medium text-gray-800 dark:text-gray-100">
+                      {r.customerName} - {currency} {Number(r.balance || 0).toFixed(2)}
+                    </p>
+                    <p className="text-xs text-gray-600 dark:text-gray-300 mt-1 whitespace-pre-wrap">{r.message}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+            {Array.isArray(commsResult.drafts) && commsResult.drafts.length > 0 && (
+              <div className="space-y-1">
+                <p className="text-xs text-gray-500 dark:text-gray-400">Supplier drafts ({commsResult.drafts.length})</p>
+                {commsResult.drafts.slice(0, 5).map((d) => (
+                  <div key={d.supplierName} className="rounded border border-gray-200 dark:border-gray-700 p-2">
+                    <p className="text-xs font-medium text-gray-800 dark:text-gray-100">
+                      {d.supplierName} - {currency} {Number(d.estimatedCost || 0).toFixed(2)}
+                    </p>
+                    <p className="text-xs text-gray-600 dark:text-gray-300 mt-1 whitespace-pre-wrap">{d.message}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
       <div className="mb-6 rounded-lg border border-emerald-200 dark:border-emerald-700 bg-emerald-50/60 dark:bg-emerald-900/20 p-4">
         <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-2">Owner Copilot (Natural Language Reports)</h3>
         <p className="text-xs text-gray-600 dark:text-gray-300 mb-3">
@@ -3074,11 +3565,11 @@ function ReportsTab() {
             placeholder="Example: Show me profit trend for this month and explain in Twi"
             className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
           />
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
             <select
               value={nlLanguage}
               onChange={(e) => setNlLanguage(e.target.value as "auto" | "en" | "twi")}
-              className="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm"
+              className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm"
             >
               <option value="auto">Auto detect</option>
               <option value="en">English</option>
@@ -3086,17 +3577,9 @@ function ReportsTab() {
             </select>
             <button
               type="button"
-              onClick={askNaturalLanguageReport}
-              disabled={nlLoading}
-              className="px-4 py-2 rounded-lg btn-primary-gradient font-medium disabled:opacity-50"
-            >
-              {nlLoading ? "Thinking..." : "Ask Copilot"}
-            </button>
-            <button
-              type="button"
               onClick={toggleVoiceQuery}
               disabled={!speechSupported}
-              className={`inline-flex items-center gap-2 px-3 py-2 rounded-lg border text-sm ${
+              className={`w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg border text-sm ${
                 isListening
                   ? "border-red-300 bg-red-50 text-red-700 dark:border-red-700 dark:bg-red-900/20 dark:text-red-300"
                   : "border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200"
@@ -3104,6 +3587,14 @@ function ReportsTab() {
             >
               <Mic className="h-4 w-4" />
               {isListening ? "Listening..." : "Voice query"}
+            </button>
+            <button
+              type="button"
+              onClick={askNaturalLanguageReport}
+              disabled={nlLoading}
+              className="w-full px-4 py-2 rounded-lg btn-primary-gradient font-medium disabled:opacity-50"
+            >
+              {nlLoading ? "Thinking..." : "Ask Copilot"}
             </button>
           </div>
           {!speechSupported && (
@@ -3180,13 +3671,13 @@ function ReportsTab() {
       <div className="space-y-4 mb-6">
         <div>
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Report type</label>
-          <div className="flex flex-wrap gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
             {(["daily", "weekly", "monthly", "pl", "tax"] as const).map((t) => (
               <button
                 key={t}
                 type="button"
                 onClick={() => setReportType(t)}
-                className={`px-3 py-2 rounded-lg text-sm font-medium ${
+                className={`w-full px-2 py-2 rounded-lg text-xs sm:text-sm font-medium text-center leading-tight ${
                   reportType === t
                     ? "btn-primary-gradient"
                     : "bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300"

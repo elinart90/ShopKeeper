@@ -116,6 +116,7 @@ api.interceptors.response.use(
 // API functions
 export const authApi = {
   getMe: () => api.get('/auth/me'),
+  getPlatformAdminStatus: () => api.get<{ success: boolean; data: { isPlatformAdmin: boolean; role?: string } }>('/auth/platform-admin-status'),
   updateProfile: (data: { name?: string; email?: string }) => api.patch('/auth/me', data),
   changePassword: (data: { currentPassword: string; newPassword: string }) =>
     api.post('/auth/change-password', data),
@@ -207,6 +208,12 @@ export const customersApi = {
     payload: { amount: number; payment_method: 'cash' | 'mobile_money' | 'bank_transfer' | 'card'; notes?: string }
   ) => api.post(`/customers/${id}/record-payment`, payload),
   getCreditSummary: () => api.get<{ success: boolean; data: CreditSummary }>('/customers/credit-summary'),
+  getCreditIntelligence: (params?: { lookbackDays?: number }) =>
+    api.get<{ success: boolean; data: CreditIntelligenceData }>('/customers/credit-intelligence', { params }),
+  queryCreditIntelligence: (data: { query: string; lookbackDays?: number }) =>
+    api.post<{ success: boolean; data: CreditIntelligenceQueryData }>('/customers/credit-intelligence/query', data),
+  runAutoCreditReminders: (data?: { intervalDays?: number; lookbackDays?: number }) =>
+    api.post<{ success: boolean; data: AutoCreditRemindersData }>('/customers/credit-intelligence/auto-reminders', data || {}),
 };
 
 export interface CreditSummary {
@@ -219,6 +226,64 @@ export interface CreditSummary {
     email?: string;
     credit_balance: number;
     credit_limit: number;
+  }>;
+}
+
+export interface CreditIntelligenceData {
+  providerUsed: 'openai' | 'claude';
+  lookbackDays: number;
+  totalExposure: number;
+  customersOwingCount: number;
+  overdueAmount: number;
+  highRiskCount: number;
+  mediumRiskCount: number;
+  collectionRateRecent: number;
+  agingBuckets: {
+    d0_7: number;
+    d8_30: number;
+    d31_60: number;
+    d61_plus: number;
+  };
+  customers: Array<{
+    id: string;
+    name: string;
+    phone?: string;
+    email?: string;
+    credit_balance: number;
+    credit_limit: number;
+    overdueDays: number;
+    riskScore: number;
+    riskLevel: 'high' | 'medium' | 'low' | string;
+    recommendedAction: string;
+  }>;
+  aiSummary: string;
+  snapshot: Record<string, unknown>;
+}
+
+export interface CreditIntelligenceQueryData {
+  providerUsed: 'openai' | 'claude';
+  lookbackDays: number;
+  query: string;
+  answer: string;
+  basedOn: {
+    totalExposure: number;
+    highRiskCount: number;
+  };
+}
+
+export interface AutoCreditRemindersData {
+  providerUsed: 'openai' | 'claude';
+  intervalDays: number;
+  dueCount: number;
+  reminders: Array<{
+    customerId: string;
+    customerName: string;
+    phone?: string | null;
+    email?: string | null;
+    balance: number;
+    overdueDays: number;
+    riskLevel: string;
+    message: string;
   }>;
 }
 
@@ -527,6 +592,62 @@ export interface StockTransfer {
   product?: { id: string; name: string; barcode?: string; sku?: string };
 }
 
+export interface CommunicationDispatchData {
+  channels?: string[];
+  summary?: string;
+  message?: string;
+  email?: { to?: string | null; sent?: boolean };
+  whatsapp?: { link?: string };
+  sms?: { text?: string };
+  reminders?: Array<{
+    customerId: string;
+    customerName: string;
+    phone?: string | null;
+    email?: string | null;
+    balance: number;
+    overdueDays: number;
+    riskLevel: string;
+    message: string;
+    whatsappLink?: string;
+    smsText?: string;
+  }>;
+  drafts?: Array<{
+    supplierName: string;
+    items: number;
+    estimatedCost: number;
+    message: string;
+  }>;
+  criticalCount?: number;
+  dueCount?: number;
+  intervalDays?: number;
+  created?: boolean;
+  planId?: string;
+}
+
+export interface RiskFraudInsightsData {
+  providerUsed: 'openai' | 'claude';
+  lookbackDays: number;
+  riskScore: number;
+  riskStatus: 'low-risk' | 'watch' | 'high-risk' | string;
+  counts: { critical: number; warning: number; info: number };
+  alerts: Array<{ type: string; severity: 'info' | 'warning' | 'critical'; message: string; metric?: number }>;
+  unresolvedDiscrepancies: number;
+  discrepancyAmountAbs: number;
+  severeVariances: number;
+  unusuallyLargeCashSales: number;
+  cashierOutliers: Array<{ userId: string; count: number; amount: number }>;
+  aiSummary: string;
+  snapshot: Record<string, unknown>;
+}
+
+export interface RiskFraudQueryData {
+  providerUsed: 'openai' | 'claude';
+  lookbackDays: number;
+  query: string;
+  answer: string;
+  basedOn: { riskScore: number; counts: { critical: number; warning: number; info: number } };
+}
+
 export interface PurchasePlanItem {
   id: string;
   plan_id: string;
@@ -688,6 +809,18 @@ export const controlsApi = {
       success: boolean;
       data: Array<{ type: string; severity: 'info' | 'warning' | 'critical'; message: string; metadata?: Record<string, unknown> }>;
     }>('/controls/stock/pattern-alerts'),
+  getRiskFraudInsights: (params?: { lookbackDays?: number }) =>
+    api.get<{ success: boolean; data: RiskFraudInsightsData }>('/controls/risk-fraud', { params }),
+  queryRiskFraudInsights: (data: { query: string; lookbackDays?: number }) =>
+    api.post<{ success: boolean; data: RiskFraudQueryData }>('/controls/risk-fraud/query', data),
+  dispatchDailyOwnerSummary: (data?: { channels?: Array<'whatsapp' | 'sms' | 'email'>; period?: 'daily' | 'weekly' | 'monthly' }) =>
+    api.post<{ success: boolean; data: CommunicationDispatchData }>('/controls/communications/daily-owner-summary', data || {}),
+  dispatchCreditReminders: (data?: { channels?: Array<'whatsapp' | 'sms' | 'email'>; lookbackDays?: number; intervalDays?: number }) =>
+    api.post<{ success: boolean; data: CommunicationDispatchData }>('/controls/communications/credit-reminders', data || {}),
+  dispatchSupplierReorder: (data?: { period?: 'daily' | 'weekly' | 'monthly' }) =>
+    api.post<{ success: boolean; data: CommunicationDispatchData }>('/controls/communications/supplier-reorder', data || {}),
+  dispatchCriticalRiskAlerts: (data?: { channels?: Array<'whatsapp' | 'sms' | 'email'>; lookbackDays?: number }) =>
+    api.post<{ success: boolean; data: CommunicationDispatchData }>('/controls/communications/critical-risk-alerts', data || {}),
   getPermissions: (userId: string, role?: string) =>
     api.get<{ success: boolean; data: { defaults: string[]; overrides: Record<string, boolean> } }>(`/controls/permissions/${userId}`, {
       params: role ? { role } : undefined,
@@ -768,6 +901,431 @@ export interface SubscriptionStatus {
   currentPeriodStart?: string | null;
   currentPeriodEnd?: string | null;
 }
+
+export interface PaginationParams {
+  page?: number;
+  limit?: number;
+}
+
+export interface PaginatedResponse<T> {
+  items: T[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
+}
+
+export interface AdminUserRow {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  status: 'active' | 'suspended' | 'flagged' | string;
+  is_active?: boolean;
+  is_flagged?: boolean;
+  flagged_reason?: string | null;
+  force_password_reset?: boolean;
+  suspended_reason?: string | null;
+  suspended_at?: string | null;
+  reactivated_at?: string | null;
+  flagged_at?: string | null;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface AdminUserWorkspaceData {
+  ownedShops: Array<{
+    id: string;
+    name: string;
+    is_active: boolean;
+    currency?: string;
+    timezone?: string;
+    created_at: string;
+  }>;
+  managedUsers: Array<{
+    shopId: string;
+    userId: string;
+    memberRole?: string;
+    linkedAt?: string;
+    user?: AdminUserRow | null;
+  }>;
+  sales: Array<{
+    id: string;
+    shop_id: string;
+    shop_name: string;
+    sale_number?: string;
+    final_amount: number;
+    payment_method?: string;
+    status: string;
+    created_at: string;
+    created_by?: string;
+    actor_name?: string;
+  }>;
+  dailySales: Array<{
+    date: string;
+    count: number;
+    revenue: number;
+  }>;
+}
+
+export interface AdminShopRow {
+  id: string;
+  name: string;
+  owner_id: string;
+  currency?: string;
+  timezone?: string;
+  is_active: boolean;
+  created_at: string;
+  plan?: 'small' | 'medium' | 'big' | 'enterprise' | null | string;
+  subscription?: {
+    planCode?: 'small' | 'medium' | 'big' | 'enterprise' | null | string;
+    status?: 'inactive' | 'active' | 'past_due' | 'expired' | 'cancelled' | string;
+    billingCycle?: 'monthly' | 'yearly' | null | string;
+    currentPeriodStart?: string | null;
+    currentPeriodEnd?: string | null;
+    isActive?: boolean;
+  };
+  kpis?: {
+    total_sales_volume: number;
+    transaction_count: number;
+    products_listed: number;
+    last_transaction_at?: string | null;
+  };
+}
+
+export interface AdminOverviewMetrics {
+  activeShops: number;
+  activeUsers: number;
+  transactionVolume: number;
+  revenueProcessed: number;
+}
+
+export interface AdminAuditLogRow {
+  id: string;
+  actor_user_id: string;
+  action: string;
+  entity_type: string;
+  entity_id?: string | null;
+  before_json?: Record<string, unknown> | null;
+  after_json?: Record<string, unknown> | null;
+  metadata_json?: Record<string, unknown> | null;
+  created_at: string;
+}
+
+export interface AdminPlatformAdminRow {
+  id: string;
+  user_id: string;
+  role: 'super_admin' | 'admin_analyst' | 'admin_operator' | string;
+  is_active: boolean;
+  created_at: string;
+  user?: {
+    id: string;
+    name: string;
+    email: string;
+    is_active?: boolean;
+  } | null;
+}
+
+export interface AdminTransactionRow {
+  id: string;
+  shop_id: string;
+  shopName?: string;
+  sale_number?: string;
+  final_amount: number;
+  payment_method?: string;
+  status: string;
+  created_at: string;
+  created_by?: string;
+  ownerId?: string | null;
+  cashier?: {
+    id: string;
+    name?: string;
+    email?: string;
+    role?: string;
+    is_active?: boolean;
+    is_flagged?: boolean;
+  } | null;
+}
+
+export interface AdminWorkerInsightRow {
+  cashierUserId: string;
+  cashierName: string;
+  cashierEmail?: string | null;
+  userStatus: string;
+  role?: string | null;
+  shopCount: number;
+  transactionCount: number;
+  completedCount: number;
+  cancelledCount: number;
+  cancelRate: number;
+  revenue: number;
+  avgTicket: number;
+  riskLevel: 'high' | 'medium' | 'low' | string;
+  signals: string[];
+}
+
+export interface AdminAiIntelligenceData {
+  providerUsed: 'claude' | 'openai';
+  topPerformingShopsRankBy?: 'revenue' | 'transactions' | 'profit';
+  period: {
+    current: { from: string; to: string };
+    previous: { from: string; to: string };
+  };
+  anomalyDetection: { summary: string; highlights: string[] };
+  churnPrediction: { summary: string; warnings: string[] };
+  growthOpportunities: { summary: string; alerts: string[] };
+  topPerformingShops: Array<{
+    shopId: string;
+    shopName: string;
+    revenue: number;
+    transactions: number;
+    profit?: number;
+    avgTicket: number;
+  }>;
+  executiveSummary: string;
+  snapshot?: Record<string, unknown>;
+}
+
+export interface AdminSecurityThreatData {
+  windowHours: number;
+  generatedAt: string;
+  totals: {
+    failedLoginAttempts: number;
+    successfulLogins: number;
+    activeSessions: number;
+  };
+  unusualAccesses: Array<{
+    userId: string;
+    name: string;
+    email: string;
+    distinctIpCount: number;
+    distinctDeviceCount: number;
+    signal: string;
+  }>;
+  sharedIps: Array<{ ipAddress: string; userCount: number }>;
+  bruteForceIps: Array<{ ipAddress: string; failedAttempts: number }>;
+  activeSessionIpHotspots: Array<{ ipAddress: string; sessionCount: number }>;
+}
+
+export interface AdminSecuritySessionRow {
+  id: string;
+  user_id: string;
+  ip_address?: string | null;
+  user_agent?: string | null;
+  device_fingerprint?: string | null;
+  is_active: boolean;
+  created_at: string;
+  last_seen_at: string;
+  expires_at?: string | null;
+  terminated_at?: string | null;
+  activeForMinutes?: number;
+  user?: { id: string; name: string; email: string } | null;
+}
+
+export interface AdminApiAccessLogRow {
+  id: string;
+  actor_user_id?: string | null;
+  method: string;
+  path: string;
+  status_code: number;
+  ip_address?: string | null;
+  user_agent?: string | null;
+  query_json?: Record<string, unknown> | null;
+  duration_ms?: number | null;
+  created_at: string;
+  actor?: { id: string; name: string; email: string } | null;
+}
+
+export interface AdminMonetizationBillingRow {
+  userId: string;
+  ownerName: string;
+  ownerEmail: string;
+  userActive: boolean;
+  shopCount: number;
+  shops: Array<{ id: string; name: string; is_active: boolean }>;
+  planCode: 'small' | 'medium' | 'big' | 'enterprise' | string;
+  billingCycle: 'monthly' | 'yearly' | string;
+  amount: number;
+  currency: string;
+  status: 'inactive' | 'active' | 'past_due' | 'expired' | 'cancelled' | string;
+  currentPeriodStart?: string | null;
+  currentPeriodEnd?: string | null;
+  overdueDays: number;
+  paymentHistory: Array<{ amount: number; status: string; billingCycle: string; paidAt?: string | null }>;
+}
+
+export interface AdminCommissionSummaryData {
+  month: string;
+  ratePercent: number;
+  totalGross: number;
+  totalCommission: number;
+  perShop: Array<{
+    shopId: string;
+    shopName: string;
+    transactionCount: number;
+    grossVolume: number;
+    commissionOwed: number;
+  }>;
+}
+
+export interface AdminRevenueForecastData {
+  activeSubscriptions: number;
+  currentMRR: number;
+  estimatedMonthlyGrowthRate: number;
+  projections: Array<{ months: number; projectedRevenue: number }>;
+}
+
+export const adminApi = {
+  // Access/Profile
+  getMe: () => api.get<{ success: boolean; data: { user_id: string; role: string; is_active: boolean; created_at: string } }>('/admin/me'),
+  getPermissions: () =>
+    api.get<{ success: boolean; data: { userId: string; role: string; scopes: string[] } }>('/admin/permissions'),
+
+  // Platform-admin management
+  getPlatformAdmins: () =>
+    api.get<{ success: boolean; data: AdminPlatformAdminRow[] }>('/admin/platform-admins'),
+  grantPlatformAdmin: (data: { email: string; role: 'super_admin' | 'admin_analyst' | 'admin_operator' }) =>
+    api.post<{ success: boolean; data: { success: boolean; message: string } }>('/admin/platform-admins/grant', data),
+  updatePlatformAdminRole: (userId: string, data: { role: 'super_admin' | 'admin_analyst' | 'admin_operator' }) =>
+    api.patch<{ success: boolean; data: { success: boolean; message: string } }>(`/admin/platform-admins/${userId}/role`, data),
+  deactivatePlatformAdmin: (userId: string, data?: { reason?: string }) =>
+    api.post<{ success: boolean; data: { success: boolean; message: string } }>(`/admin/platform-admins/${userId}/deactivate`, data || {}),
+  reactivatePlatformAdmin: (userId: string, data?: { reason?: string }) =>
+    api.post<{ success: boolean; data: { success: boolean; message: string } }>(`/admin/platform-admins/${userId}/reactivate`, data || {}),
+
+  // User management
+  getUsers: (params?: PaginationParams & { search?: string; status?: string; role?: string; from?: string; to?: string }) =>
+    api.get<{ success: boolean; data: PaginatedResponse<AdminUserRow> }>('/admin/users', { params }),
+  getUserById: (id: string) => api.get<{ success: boolean; data: AdminUserRow & { ownedShops?: number; memberShops?: number } }>(`/admin/users/${id}`),
+  suspendUser: (id: string, data?: { reason?: string }) =>
+    api.post<{ success: boolean; data: { success: boolean; message: string } }>(`/admin/users/${id}/suspend`, data || {}),
+  reactivateUser: (id: string) =>
+    api.post<{ success: boolean; data: { success: boolean; message: string } }>(`/admin/users/${id}/reactivate`, {}),
+  forcePasswordReset: (id: string) =>
+    api.post<{ success: boolean; data: { success: boolean; message: string } }>(`/admin/users/${id}/force-password-reset`, {}),
+  getUserLoginHistory: (id: string, params?: PaginationParams) =>
+    api.get<{
+      success: boolean;
+      data: PaginatedResponse<{
+        id: string;
+        user_id: string;
+        ip_address?: string | null;
+        user_agent?: string | null;
+        success: boolean;
+        created_at: string;
+      }>;
+    }>(`/admin/users/${id}/login-history`, { params }),
+  getUserWorkspace: (id: string, params?: { from?: string; to?: string; limit?: number }) =>
+    api.get<{ success: boolean; data: AdminUserWorkspaceData }>(`/admin/users/${id}/workspace`, { params }),
+  flagUser: (id: string, data: { reason: string }) =>
+    api.post<{ success: boolean; data: { success: boolean; message: string } }>(`/admin/users/${id}/flag`, data),
+  cancelUserWorkspaceSale: (id: string, saleId: string) =>
+    api.post<{ success: boolean; data: { success: boolean; message: string } }>(`/admin/users/${id}/sales/${saleId}/cancel`, {}),
+  deleteManagedUser: (id: string, targetUserId: string) =>
+    api.delete<{ success: boolean; data: { success: boolean; message: string } }>(`/admin/users/${id}/managed-users/${targetUserId}`),
+
+  // Shop management
+  getShops: (params?: PaginationParams & { search?: string; plan?: 'small' | 'medium' | 'big' | 'enterprise'; active?: boolean }) =>
+    api.get<{ success: boolean; data: PaginatedResponse<AdminShopRow> }>('/admin/shops', { params }),
+  getShopById: (id: string) =>
+    api.get<{ success: boolean; data: AdminShopRow & { owner?: { id: string; name: string; email: string } | null } }>(`/admin/shops/${id}`),
+  suspendShop: (id: string) =>
+    api.post<{ success: boolean; data: { success: boolean; message: string } }>(`/admin/shops/${id}/suspend`, {}),
+  reactivateShop: (id: string) =>
+    api.post<{ success: boolean; data: { success: boolean; message: string } }>(`/admin/shops/${id}/reactivate`, {}),
+  assignShopPlan: (id: string, data: { plan: 'small' | 'medium' | 'big' | 'enterprise' }) =>
+    api.post<{ success: boolean; data: { success: boolean; message: string } }>(`/admin/shops/${id}/assign-plan`, data),
+  getShopDrilldown: (id: string) =>
+    api.get<{
+      success: boolean;
+      data: {
+        shop: Record<string, unknown>;
+        kpis: Record<string, unknown> | null;
+        membersCount: number;
+        recentSales: Array<Record<string, unknown>>;
+        productsSnapshot: Array<Record<string, unknown>>;
+      };
+    }>(`/admin/shops/${id}/drilldown`),
+
+  // Platform analytics
+  getOverview: () => api.get<{ success: boolean; data: AdminOverviewMetrics }>('/admin/analytics/overview'),
+  getGrowth: (params?: { days?: number }) =>
+    api.get<{ success: boolean; data: Array<Record<string, unknown>> }>('/admin/analytics/growth', { params }),
+  getTopProducts: (params?: { days?: number; limit?: number }) =>
+    api.get<{ success: boolean; data: Array<Record<string, unknown>> }>('/admin/analytics/top-products', { params }),
+  getPeakHours: (params?: { days?: number }) =>
+    api.get<{ success: boolean; data: Array<Record<string, unknown>> }>('/admin/analytics/peak-hours', { params }),
+
+  // Audit logs
+  getAuditLogs: (params?: PaginationParams & { actorUserId?: string; action?: string; entityType?: string; from?: string; to?: string }) =>
+    api.get<{ success: boolean; data: PaginatedResponse<AdminAuditLogRow> }>('/admin/audit-logs', { params }),
+  getTransactions: (params?: PaginationParams & {
+    from?: string;
+    to?: string;
+    shopId?: string;
+    cashierUserId?: string;
+    paymentMethod?: string;
+    status?: string;
+    search?: string;
+  }) =>
+    api.get<{ success: boolean; data: PaginatedResponse<AdminTransactionRow> }>('/admin/transactions', { params }),
+  cancelTransactionSale: (saleId: string) =>
+    api.post<{ success: boolean; data: { success: boolean; message: string } }>(`/admin/transactions/${saleId}/cancel`, {}),
+  getWorkerInsights: (params?: { from?: string; to?: string }) =>
+    api.get<{ success: boolean; data: AdminWorkerInsightRow[] }>('/admin/workers/insights', { params }),
+  revokeWorkerAccess: (userId: string, data?: { shopId?: string }) =>
+    api.post<{ success: boolean; data: { success: boolean; message: string } }>(`/admin/workers/${userId}/revoke-access`, data || {}),
+  getAiIntelligence: (params?: { from?: string; to?: string; rankBy?: 'revenue' | 'transactions' | 'profit' }) =>
+    api.get<{ success: boolean; data: AdminAiIntelligenceData }>('/admin/ai-intelligence', { params }),
+  emailAiExecutiveSummary: (data?: { email?: string }) =>
+    api.post<{ success: boolean; data: { sent: boolean; recipient: string; providerUsed: string; generatedAt: string; mondayAutomationHint?: string } }>(
+      '/admin/ai-intelligence/executive-summary/email',
+      data || {}
+    ),
+  getSecurityThreats: (params?: { hours?: number }) =>
+    api.get<{ success: boolean; data: AdminSecurityThreatData }>('/admin/security/threats', { params }),
+  getSecuritySessions: (params?: PaginationParams & { search?: string; activeOnly?: boolean }) =>
+    api.get<{ success: boolean; data: PaginatedResponse<AdminSecuritySessionRow> }>('/admin/security/sessions', { params }),
+  terminateSecuritySession: (sessionId: string, data?: { reason?: string }) =>
+    api.post<{ success: boolean; data: { success: boolean; message: string } }>(`/admin/security/sessions/${sessionId}/terminate`, data || {}),
+  getApiAccessLogs: (params?: PaginationParams & { from?: string; to?: string; actorUserId?: string; path?: string; method?: string; statusCode?: number }) =>
+    api.get<{ success: boolean; data: PaginatedResponse<AdminApiAccessLogRow> }>('/admin/security/api-access-logs', { params }),
+  gdprDeleteUser: (data: { userId: string; reason?: string }) =>
+    api.post<{ success: boolean; data: { success: boolean; message: string } }>('/admin/privacy/gdpr-delete-user', data),
+  enforce2faPolicy: (data: { thresholdAmount: number; days?: number }) =>
+    api.post<{ success: boolean; data: { thresholdAmount: number; days: number; affectedOwnerCount: number; affectedOwnerIds: string[] } }>(
+      '/admin/security/enforce-2fa',
+      data
+    ),
+  getMonetizationBilling: (params?: PaginationParams & { search?: string; plan?: 'small' | 'medium' | 'big' | 'enterprise'; status?: string; overdueOnly?: boolean }) =>
+    api.get<{ success: boolean; data: PaginatedResponse<AdminMonetizationBillingRow> }>('/admin/monetization/billing', { params }),
+  setMonetizationPlan: (data: { userId: string; planCode: 'small' | 'medium' | 'big' | 'enterprise'; billingCycle?: 'monthly' | 'yearly' }) =>
+    api.post<{ success: boolean; data: { success: boolean; message: string } }>('/admin/monetization/set-plan', data),
+  getMonetizationPromos: () =>
+    api.get<{ success: boolean; data: Array<Record<string, unknown>> }>('/admin/monetization/promos'),
+  createMonetizationPromo: (data: {
+    code: string;
+    discountType: 'percent' | 'fixed';
+    discountValue: number;
+    trialExtensionDays?: number;
+    maxRedemptions?: number;
+    validFrom?: string;
+    validTo?: string;
+  }) => api.post<{ success: boolean; data: Record<string, unknown> }>('/admin/monetization/promos', data),
+  applyMonetizationPromo: (data: { userId: string; code: string }) =>
+    api.post<{ success: boolean; data: { success: boolean; message: string } }>('/admin/monetization/promos/apply', data),
+  getCommissionSummary: (params?: { month?: string; ratePercent?: number }) =>
+    api.get<{ success: boolean; data: AdminCommissionSummaryData }>('/admin/monetization/commissions', { params }),
+  getRevenueForecast: (params?: { months?: number }) =>
+    api.get<{ success: boolean; data: AdminRevenueForecastData }>('/admin/monetization/forecast', { params }),
+  suspendOverduePlans: (data?: { daysPastDue?: number }) =>
+    api.post<{ success: boolean; data: { daysPastDue: number; suspendedShopCount: number; affectedOwners: string[] } }>(
+      '/admin/monetization/suspend-overdue',
+      data || {}
+    ),
+};
 
 export const subscriptionsApi = {
   getPlans: () =>

@@ -480,4 +480,80 @@ export class ControlsController {
       errorHandler(error as AppError, req, res, next);
     }
   }
+
+  async getRiskFraudInsights(req: ShopRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.shopId) throw new AppError('Shop ID is required', 400);
+      const lookbackDays = req.query.lookbackDays ? Number(req.query.lookbackDays) : 30;
+      const data = await controlsService.getRiskFraudInsights(req.shopId, lookbackDays);
+      res.json({ success: true, data });
+    } catch (error) {
+      errorHandler(error as AppError, req, res, next);
+    }
+  }
+
+  async queryRiskFraudInsights(req: ShopRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.shopId) throw new AppError('Shop ID is required', 400);
+      const query = String(req.body?.query || '').trim();
+      if (!query) throw new AppError('query is required', 400);
+      const lookbackDays = req.body?.lookbackDays != null ? Number(req.body.lookbackDays) : 30;
+      const data = await controlsService.queryRiskFraudInsights(req.shopId, query, lookbackDays);
+      res.json({ success: true, data });
+    } catch (error) {
+      errorHandler(error as AppError, req, res, next);
+    }
+  }
+
+  async dispatchDailyOwnerSummary(req: ShopRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.shopId || !req.userId) throw new AppError('Shop ID and User ID are required', 400);
+      const channels = Array.isArray(req.body?.channels) ? req.body.channels : undefined;
+      const period = String(req.body?.period || 'daily') as 'daily' | 'weekly' | 'monthly';
+      const data = await controlsService.dispatchDailyOwnerSummary(req.shopId, req.userId, { channels, period });
+      res.json({ success: true, data });
+    } catch (error) {
+      errorHandler(error as AppError, req, res, next);
+    }
+  }
+
+  async dispatchCreditRepaymentReminders(req: ShopRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.shopId || !req.userId) throw new AppError('Shop ID and User ID are required', 400);
+      const channels = Array.isArray(req.body?.channels) ? req.body.channels : undefined;
+      const lookbackDays = req.body?.lookbackDays != null ? Number(req.body.lookbackDays) : undefined;
+      const intervalDays = req.body?.intervalDays != null ? Number(req.body.intervalDays) : undefined;
+      const data = await controlsService.dispatchCreditRepaymentReminders(req.shopId, req.userId, {
+        channels,
+        lookbackDays,
+        intervalDays,
+      });
+      res.json({ success: true, data });
+    } catch (error) {
+      errorHandler(error as AppError, req, res, next);
+    }
+  }
+
+  async dispatchSupplierReorderDrafts(req: ShopRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.shopId || !req.userId) throw new AppError('Shop ID and User ID are required', 400);
+      const period = String(req.body?.period || 'weekly') as 'daily' | 'weekly' | 'monthly';
+      const data = await controlsService.dispatchSupplierReorderDrafts(req.shopId, req.userId, { period });
+      res.json({ success: true, data });
+    } catch (error) {
+      errorHandler(error as AppError, req, res, next);
+    }
+  }
+
+  async dispatchCriticalRiskAlerts(req: ShopRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.shopId || !req.userId) throw new AppError('Shop ID and User ID are required', 400);
+      const channels = Array.isArray(req.body?.channels) ? req.body.channels : undefined;
+      const lookbackDays = req.body?.lookbackDays != null ? Number(req.body.lookbackDays) : undefined;
+      const data = await controlsService.dispatchCriticalRiskAlerts(req.shopId, req.userId, { channels, lookbackDays });
+      res.json({ success: true, data });
+    } catch (error) {
+      errorHandler(error as AppError, req, res, next);
+    }
+  }
 }

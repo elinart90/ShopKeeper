@@ -8,6 +8,12 @@ import { AppError } from '../../middleware/errorHandler';
 
 const SALT_ROUNDS = 10;
 
+interface LoginAttemptMeta {
+  ipAddress?: string | null;
+  userAgent?: string | null;
+  deviceFingerprint?: string | null;
+}
+
 function isNetworkError(err: any): boolean {
   const msg = err?.message || String(err);
   return (
@@ -20,6 +26,45 @@ function isNetworkError(err: any): boolean {
 }
 
 export class AuthService {
+  private async createSession(userId: string, meta?: LoginAttemptMeta): Promise<string | null> {
+    try {
+      const { data, error } = await supabase
+        .from('platform_sessions')
+        .insert({
+          user_id: userId,
+          ip_address: meta?.ipAddress || null,
+          user_agent: meta?.userAgent || null,
+          device_fingerprint: meta?.deviceFingerprint || null,
+          is_active: true,
+          last_seen_at: new Date().toISOString(),
+          expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+        })
+        .select('id')
+        .single();
+      if (error || !data?.id) return null;
+      return String(data.id);
+    } catch {
+      return null;
+    }
+  }
+
+  private async writeLoginHistory(
+    userId: string,
+    success: boolean,
+    meta?: LoginAttemptMeta
+  ) {
+    try {
+      await supabase.from('user_login_history').insert({
+        user_id: userId,
+        ip_address: meta?.ipAddress || null,
+        user_agent: meta?.userAgent || null,
+        success,
+      });
+    } catch (err) {
+      logger.warn('Failed to write user_login_history event', err);
+    }
+  }
+
   async register(name: string, email: string, password: string) {
     const normalizedEmail = email.toLowerCase().trim();
 
@@ -84,15 +129,24 @@ export class AuthService {
     };
   }
 
-  async login(email: string, password: string) {
+  async login(email: string, password: string, meta?: LoginAttemptMeta) {
     const normalizedEmail = email.toLowerCase().trim();
 
-    let user: { id: string; name: string; email: string; role: string; password_hash: string } | null;
+    let user: {
+      id: string;
+      name: string;
+      email: string;
+      role: string;
+      password_hash: string;
+      is_active?: boolean;
+      force_password_reset?: boolean;
+      two_factor_enabled?: boolean;
+    } | null;
     let error: any;
     try {
       const result = await supabase
         .from('users')
-        .select('id, name, email, role, password_hash')
+        .select('id, name, email, role, password_hash, is_active, force_password_reset, two_factor_enabled')
         .eq('email', normalizedEmail)
         .single();
       user = result.data;
@@ -108,18 +162,38 @@ export class AuthService {
     }
 
     if (error || !user) {
-      throw new Error('Invalid email or password');
+      throw new AppError('Invalid email or password', 401, 'AUTH_INVALID_CREDENTIALS');
+    }
+
+    if (user.is_active === false) {
+      await this.writeLoginHistory(user.id, false, meta);
+      throw new AppError('Your account is suspended. Contact support.', 403, 'AUTH_ACCOUNT_SUSPENDED');
+    }
+
+    if (user.force_password_reset === true) {
+      await this.writeLoginHistory(user.id, false, meta);
+      throw new AppError('Password reset required. Use forgot password to continue.', 403, 'AUTH_PASSWORD_RESET_REQUIRED');
     }
 
     const isValid = await bcrypt.compare(password, user.password_hash);
     if (!isValid) {
-      throw new Error('Invalid email or password');
+      await this.writeLoginHistory(user.id, false, meta);
+      throw new AppError('Invalid email or password', 401, 'AUTH_INVALID_CREDENTIALS');
     }
 
-    const token = this.createToken(user.id, user.email);
+    const { data: policy } = await supabase.from('user_security_policies').select('require_2fa').eq('user_id', user.id).maybeSingle();
+    if (policy?.require_2fa === true && user.two_factor_enabled !== true) {
+      await this.writeLoginHistory(user.id, false, meta);
+      throw new AppError('Two-factor authentication is required for this account.', 403, 'AUTH_2FA_REQUIRED');
+    }
+
+    await this.writeLoginHistory(user.id, true, meta);
+    const sessionId = await this.createSession(user.id, meta);
+    const token = this.createToken(user.id, user.email, sessionId || undefined);
     return {
       user: { id: user.id, name: user.name, email: user.email, role: user.role },
       token,
+      sessionId: sessionId || undefined,
     };
   }
 
@@ -131,11 +205,46 @@ export class AuthService {
     const normalizedEmail = email.toLowerCase().trim();
     const { data: existing } = await supabase
       .from('users')
-      .select('id, name, email')
+      .select('id, name, email, role, is_active, force_password_reset')
       .eq('email', normalizedEmail)
       .maybeSingle();
 
     if (existing) {
+      const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
+      let shouldUpdate = false;
+
+      // If this user no longer owns any shop, normalize role to staff for member login behavior.
+      const { data: ownedShop } = await supabase.from('shops').select('id').eq('owner_id', existing.id).limit(1).maybeSingle();
+      if (!ownedShop && String(existing.role || '').toLowerCase() !== 'staff') {
+        updates.role = 'staff';
+        shouldUpdate = true;
+      }
+
+      // Re-activate previously suspended staff accounts so owners can reuse them.
+      if (existing.is_active === false) {
+        updates.is_active = true;
+        updates.suspended_reason = null;
+        updates.suspended_at = null;
+        updates.reactivated_at = new Date().toISOString();
+        shouldUpdate = true;
+      }
+
+      // Clear forced reset lock for re-invited non-owner users.
+      if (existing.force_password_reset === true && !ownedShop) {
+        updates.force_password_reset = false;
+        shouldUpdate = true;
+      }
+
+      // For non-owner existing users, allow owner-provided password to take effect.
+      if (password && password.length >= 8 && !ownedShop) {
+        updates.password_hash = await bcrypt.hash(password, SALT_ROUNDS);
+        shouldUpdate = true;
+      }
+
+      if (shouldUpdate) {
+        await supabase.from('users').update(updates).eq('id', existing.id);
+      }
+
       return { id: existing.id, name: existing.name, email: existing.email };
     }
 
@@ -169,6 +278,24 @@ export class AuthService {
       throw new Error('User not found');
     }
     return { id: user.id, name: user.name, email: user.email, role: user.role };
+  }
+
+  async getPlatformAdminStatus(userId: string) {
+    const { data, error } = await supabase
+      .from('platform_admins')
+      .select('user_id, role, is_active')
+      .eq('user_id', userId)
+      .eq('is_active', true)
+      .maybeSingle();
+    if (error) {
+      logger.warn('Failed to read platform admin status', error);
+      return { isPlatformAdmin: false as const };
+    }
+    if (!data) return { isPlatformAdmin: false as const };
+    return {
+      isPlatformAdmin: true as const,
+      role: String((data as any).role || ''),
+    };
   }
 
   async updateProfile(userId: string, data: { name?: string; email?: string }) {
@@ -285,9 +412,9 @@ export class AuthService {
     throw err;
   }
 
-  private createToken(userId: string, email: string) {
+  private createToken(userId: string, email: string, sessionId?: string) {
     return jwt.sign(
-      { sub: userId, email },
+      { sub: userId, email, sid: sessionId },
       env.jwtSecret,
       { expiresIn: '7d' }
     );
@@ -369,14 +496,22 @@ export class AuthService {
     if (findErr || !row) throw new Error('Invalid or expired PIN');
 
     const passwordHash = await bcrypt.hash(newPassword, SALT_ROUNDS);
-    const { error: updateErr } = await supabase
+    const { data: updatedRows, error: updateErr } = await supabase
       .from('users')
-      .update({ password_hash: passwordHash, updated_at: new Date().toISOString() })
-      .eq('email', normalizedEmail);
+      .update({
+        password_hash: passwordHash,
+        force_password_reset: false,
+        updated_at: new Date().toISOString(),
+      })
+      .ilike('email', normalizedEmail)
+      .select('id');
 
     if (updateErr) {
       logger.error('Error updating password:', updateErr);
       throw new Error('Failed to reset password');
+    }
+    if (!updatedRows || updatedRows.length === 0) {
+      throw new Error('No user account matched this email for password reset');
     }
 
     await supabase.from('password_reset_pins').delete().eq('id', row.id);

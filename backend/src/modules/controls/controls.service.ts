@@ -1,12 +1,16 @@
 import { supabase } from '../../config/supabase';
+import { env } from '../../config/env';
 import { getDefaultPermissionsForRole } from '../../middleware/requirePermission';
 import { logAuditAction } from './audit';
 import { logger } from '../../utils/logger';
 import { InventoryService } from '../inventory/inventory.service';
 import { ReportsService } from '../reports/reports.service';
+import { MembersService } from '../members/members.service';
+import { sendGenericEmail } from '../../utils/email';
 
 const inventoryService = new InventoryService();
 const reportsService = new ReportsService();
+const membersService = new MembersService();
 
 function isMissingControlsTables(error: any) {
   const code = String(error?.code || '');
@@ -81,6 +85,121 @@ function shouldRequireTwoPersonVerification(sellingPrice: number, costPrice: num
 }
 
 export class ControlsService {
+  private normalizePhoneForWhatsApp(phone?: string | null) {
+    const raw = String(phone || '').trim();
+    if (!raw) return '';
+    const digits = raw.replace(/[^\d+]/g, '');
+    if (!digits) return '';
+    if (digits.startsWith('+')) return digits.slice(1);
+    if (digits.startsWith('233')) return digits;
+    if (digits.startsWith('0')) return `233${digits.slice(1)}`;
+    return digits;
+  }
+
+  private buildWhatsAppLink(phone: string | undefined, message: string) {
+    const normalized = this.normalizePhoneForWhatsApp(phone || '');
+    if (!normalized) return '';
+    return `https://wa.me/${normalized}?text=${encodeURIComponent(message || '')}`;
+  }
+
+  private async getShopOwnerContact(shopId: string) {
+    const { data: shop, error: shopErr } = await supabase
+      .from('shops')
+      .select('id,name,owner_id')
+      .eq('id', shopId)
+      .single();
+    if (shopErr || !shop?.owner_id) throw new Error('Shop owner not found');
+
+    const { data: owner } = await supabase
+      .from('users')
+      .select('id,name,email')
+      .eq('id', shop.owner_id)
+      .maybeSingle();
+    return {
+      shopName: String(shop.name || 'ShopKeeper Shop'),
+      ownerId: String(shop.owner_id),
+      ownerName: String(owner?.name || 'Owner'),
+      ownerEmail: owner?.email ? String(owner.email) : '',
+      ownerPhone: '',
+    };
+  }
+
+  private normalizeCurrencyText(text: string, currencyCode: string = 'GHS') {
+    return String(text || '')
+      .replace(/\$/g, `${currencyCode} `)
+      .replace(/\bUSD\b/gi, currencyCode)
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+  }
+
+  private async callOpenAiText(prompt: string): Promise<string> {
+    if (!env.openaiApiKey) throw new Error('OPENAI_API_KEY not configured');
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${env.openaiApiKey}`,
+      },
+      body: JSON.stringify({
+        model: env.openaiModel || 'gpt-4o-mini',
+        temperature: 0.2,
+        messages: [
+          { role: 'system', content: 'You are a risk and fraud analyst for retail POS systems.' },
+          { role: 'user', content: prompt },
+        ],
+      }),
+    });
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => '');
+      throw new Error(`OpenAI failed (${response.status}): ${errorText.slice(0, 300)}`);
+    }
+    const data: any = await response.json();
+    const text = String(data?.choices?.[0]?.message?.content || '').trim();
+    if (!text) throw new Error('OpenAI returned empty content');
+    return text;
+  }
+
+  private async callClaudeText(prompt: string): Promise<string> {
+    if (!env.claudeApiKey) throw new Error('CLAUDE_API_KEY not configured');
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': env.claudeApiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: env.claudeModel || 'claude-3-5-sonnet-latest',
+        max_tokens: 900,
+        temperature: 0.2,
+        system: 'You are a retail risk and fraud assistant. Be concise and practical.',
+        messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }],
+      }),
+    });
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => '');
+      throw new Error(`Claude failed (${response.status}): ${errorText.slice(0, 300)}`);
+    }
+    const data: any = await response.json();
+    const textBlock = Array.isArray(data?.content) ? data.content.find((b: any) => b?.type === 'text') : null;
+    const text = String(textBlock?.text || '').trim();
+    if (!text) throw new Error('Claude returned empty content');
+    return text;
+  }
+
+  private async callOpenAiThenClaude(prompt: string) {
+    try {
+      const text = await this.callOpenAiText(prompt);
+      return { provider: 'openai' as const, text };
+    } catch (openErr: any) {
+      logger.warn('OpenAI risk/fraud call failed; trying Claude fallback', {
+        message: String(openErr?.message || openErr),
+      });
+      const text = await this.callClaudeText(prompt);
+      return { provider: 'claude' as const, text };
+    }
+  }
+
   async startShift(shopId: string, userId: string, openingCash: number, notes?: string) {
     const { data: existingOpen } = await supabase
       .from('shift_sessions')
@@ -1626,5 +1745,357 @@ export class ControlsService {
     }
 
     return alerts;
+  }
+
+  async getRiskFraudInsights(shopId: string, lookbackDays = 30) {
+    const days = Math.max(1, Math.min(365, Number(lookbackDays || 30)));
+    const sinceIso = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+
+    const [patternAlerts, discrepanciesRes, variancesRes, salesRes] = await Promise.all([
+      this.getVariancePatternAlerts(shopId),
+      supabase
+        .from('cash_discrepancies')
+        .select('id, amount, status, user_id, created_at')
+        .eq('shop_id', shopId)
+        .gte('created_at', sinceIso)
+        .order('created_at', { ascending: false })
+        .limit(1000),
+      supabase
+        .from('stock_variances')
+        .select('id, severity, status, variance_value, created_by, created_at')
+        .eq('shop_id', shopId)
+        .gte('created_at', sinceIso)
+        .order('created_at', { ascending: false })
+        .limit(2000),
+      supabase
+        .from('sales')
+        .select('id, final_amount, payment_method, created_by, created_at, notes, status')
+        .eq('shop_id', shopId)
+        .eq('status', 'completed')
+        .gte('created_at', sinceIso)
+        .order('created_at', { ascending: false })
+        .limit(5000),
+    ]);
+    if (discrepanciesRes.error && !isMissingControlsTables(discrepanciesRes.error)) {
+      throw new Error('Failed to load cash discrepancy risk data');
+    }
+    if (variancesRes.error && !isMissingControlsTables(variancesRes.error)) {
+      throw new Error('Failed to load stock variance risk data');
+    }
+    if (salesRes.error) throw new Error('Failed to load sales risk data');
+
+    const discrepancies = discrepanciesRes.data || [];
+    const variances = variancesRes.data || [];
+    const sales = salesRes.data || [];
+
+    const unresolvedDiscrepancies = discrepancies.filter((d: any) => String(d.status || '') === 'open');
+    const discrepancyAmountAbs = unresolvedDiscrepancies.reduce(
+      (sum: number, d: any) => sum + Math.abs(Number(d.amount || 0)),
+      0
+    );
+    const severeVariances = variances.filter((v: any) => ['critical', 'severe'].includes(String(v.severity || '')));
+    const unresolvedVariances = variances.filter((v: any) => String(v.status || '').includes('pending'));
+
+    const cashSales = sales.filter((s: any) => String(s.payment_method || '') === 'cash');
+    const avgCash = cashSales.length
+      ? cashSales.reduce((sum: number, s: any) => sum + Number(s.final_amount || 0), 0) / cashSales.length
+      : 0;
+    const veryLargeCashSales = cashSales.filter((s: any) => Number(s.final_amount || 0) >= Math.max(2000, avgCash * 2.5));
+
+    const cancelledLikeSales = sales.filter((s: any) => String(s.notes || '').toLowerCase().includes('cancel'));
+    const byCashier = new Map<string, { count: number; amount: number }>();
+    for (const s of sales) {
+      const uid = String((s as any).created_by || 'unknown');
+      const row = byCashier.get(uid) || { count: 0, amount: 0 };
+      row.count += 1;
+      row.amount += Number((s as any).final_amount || 0);
+      byCashier.set(uid, row);
+    }
+    const cashierOutliers = Array.from(byCashier.entries())
+      .map(([userId, v]) => ({
+        userId,
+        count: v.count,
+        amount: Number(v.amount.toFixed(2)),
+      }))
+      .sort((a, b) => b.amount - a.amount)
+      .slice(0, 5);
+
+    const alerts: Array<{ type: string; severity: 'info' | 'warning' | 'critical'; message: string; metric?: number }> = [];
+    alerts.push(...patternAlerts.map((a: any) => ({
+      type: String(a.type || 'pattern'),
+      severity: a.severity as 'info' | 'warning' | 'critical',
+      message: String(a.message || 'Pattern detected'),
+      metric: Number((a.metadata as any)?.value || 0),
+    })));
+
+    if (unresolvedDiscrepancies.length > 0) {
+      alerts.push({
+        type: 'open_cash_discrepancies',
+        severity: unresolvedDiscrepancies.length >= 3 || discrepancyAmountAbs >= 500 ? 'critical' : 'warning',
+        message: `${unresolvedDiscrepancies.length} open cash discrepancy case(s), total gap ${this.normalizeCurrencyText(`$${discrepancyAmountAbs.toFixed(2)}`)}`,
+        metric: discrepancyAmountAbs,
+      });
+    }
+    if (severeVariances.length > 0) {
+      alerts.push({
+        type: 'severe_stock_variances',
+        severity: severeVariances.length >= 5 ? 'critical' : 'warning',
+        message: `${severeVariances.length} severe/critical stock variance case(s) in last ${days} days`,
+        metric: severeVariances.length,
+      });
+    }
+    if (veryLargeCashSales.length > 0) {
+      alerts.push({
+        type: 'large_cash_sales',
+        severity: veryLargeCashSales.length >= 2 ? 'critical' : 'warning',
+        message: `${veryLargeCashSales.length} unusually large cash sale(s) detected`,
+        metric: veryLargeCashSales.length,
+      });
+    }
+    if (cancelledLikeSales.length > 0) {
+      alerts.push({
+        type: 'cancel_note_frequency',
+        severity: cancelledLikeSales.length >= 4 ? 'warning' : 'info',
+        message: `${cancelledLikeSales.length} sale note(s) mention cancellations/voids`,
+        metric: cancelledLikeSales.length,
+      });
+    }
+
+    const criticalCount = alerts.filter((a) => a.severity === 'critical').length;
+    const warningCount = alerts.filter((a) => a.severity === 'warning').length;
+    const infoCount = alerts.filter((a) => a.severity === 'info').length;
+
+    let score = 100;
+    score -= Math.min(40, criticalCount * 15);
+    score -= Math.min(25, warningCount * 8);
+    score -= Math.min(10, infoCount * 2);
+    score = Math.max(0, Math.min(100, Math.round(score)));
+    const status = score >= 80 ? 'low-risk' : score >= 60 ? 'watch' : 'high-risk';
+
+    const snapshot = {
+      lookbackDays: days,
+      score,
+      status,
+      counts: { critical: criticalCount, warning: warningCount, info: infoCount },
+      unresolvedDiscrepancies: unresolvedDiscrepancies.length,
+      discrepancyAmountAbs,
+      severeVariances: severeVariances.length,
+      unresolvedVariances: unresolvedVariances.length,
+      unusuallyLargeCashSales: veryLargeCashSales.length,
+      cancellationMentions: cancelledLikeSales.length,
+      cashierOutliers,
+      alerts: alerts.slice(0, 20),
+    };
+
+    const prompt = `
+You are ShopKeeper Risk & Fraud Copilot.
+Use only this JSON:
+${JSON.stringify(snapshot, null, 2)}
+
+Return concise practical text with:
+- top risk signal
+- 3 specific actions to reduce fraud risk this week
+- one monitoring rule to automate
+
+Currency rules:
+- Use GHS only.
+- Never use "$" or "USD".
+`;
+    const ai = await this.callOpenAiThenClaude(prompt);
+
+    return {
+      providerUsed: ai.provider,
+      lookbackDays: days,
+      riskScore: score,
+      riskStatus: status,
+      counts: snapshot.counts,
+      alerts: snapshot.alerts,
+      unresolvedDiscrepancies: snapshot.unresolvedDiscrepancies,
+      discrepancyAmountAbs: snapshot.discrepancyAmountAbs,
+      severeVariances: snapshot.severeVariances,
+      unusuallyLargeCashSales: snapshot.unusuallyLargeCashSales,
+      cashierOutliers: snapshot.cashierOutliers,
+      aiSummary: this.normalizeCurrencyText(ai.text),
+      snapshot,
+    };
+  }
+
+  async queryRiskFraudInsights(shopId: string, query: string, lookbackDays = 30) {
+    const insights = await this.getRiskFraudInsights(shopId, lookbackDays);
+    const prompt = `
+You are ShopKeeper fraud analyst.
+Answer with only the provided payload.
+Question: ${query}
+Payload:
+${JSON.stringify(insights.snapshot || {}, null, 2)}
+
+Return concise answer with bullets and one next action.
+Currency rules: Use GHS only; do not use "$" or "USD".
+`;
+    const ai = await this.callOpenAiThenClaude(prompt);
+    return {
+      providerUsed: ai.provider,
+      lookbackDays: Number(lookbackDays || 30),
+      query,
+      answer: this.normalizeCurrencyText(ai.text),
+      basedOn: {
+        riskScore: insights.riskScore,
+        counts: insights.counts,
+      },
+    };
+  }
+
+  async dispatchDailyOwnerSummary(
+    shopId: string,
+    userId: string,
+    input?: { channels?: Array<'whatsapp' | 'sms' | 'email'>; period?: 'daily' | 'weekly' | 'monthly' }
+  ) {
+    const channels = input?.channels?.length ? input.channels : ['whatsapp', 'email'];
+    const period = input?.period || 'daily';
+    const [owner, bi] = await Promise.all([
+      this.getShopOwnerContact(shopId),
+      reportsService.getBusinessIntelligence(shopId, userId, period),
+    ]);
+
+    const text = this.normalizeCurrencyText(
+      [
+        `${owner.shopName} owner summary (${period})`,
+        `Revenue: GHS ${Number(bi?.snapshot?.kpis?.sales || 0).toFixed(2)}`,
+        `Gross profit: GHS ${Number(bi?.snapshot?.kpis?.grossProfit || 0).toFixed(2)}`,
+        `Transactions: ${Number(bi?.snapshot?.kpis?.transactions || 0)}`,
+        `Risk hint: ${String(bi?.whyProfitDown || 'Track margin and expenses daily.')}`,
+      ].join('\n')
+    );
+
+    let emailSent = false;
+    if (channels.includes('email') && owner.ownerEmail) {
+      emailSent = await sendGenericEmail({
+        to: owner.ownerEmail,
+        subject: `${owner.shopName} - Daily owner summary`,
+        text,
+      });
+    }
+
+    return {
+      channels,
+      summary: text,
+      email: {
+        to: owner.ownerEmail || null,
+        sent: emailSent,
+      },
+      whatsapp: {
+        link: channels.includes('whatsapp') ? this.buildWhatsAppLink(owner.ownerPhone, text) : '',
+      },
+      sms: {
+        text: channels.includes('sms') ? text : '',
+      },
+      basedOn: { period, provider: bi.providerUsed },
+    };
+  }
+
+  async dispatchCreditRepaymentReminders(
+    shopId: string,
+    userId: string,
+    input?: { channels?: Array<'whatsapp' | 'sms' | 'email'>; lookbackDays?: number; intervalDays?: number }
+  ) {
+    const channels = input?.channels?.length ? input.channels : ['whatsapp', 'sms'];
+    const result = await membersService.runAutoCreditReminders(
+      shopId,
+      userId,
+      Number(input?.intervalDays || 3),
+      Number(input?.lookbackDays || 90)
+    );
+
+    return {
+      channels,
+      intervalDays: result.intervalDays,
+      dueCount: result.dueCount,
+      reminders: (result.reminders || []).map((r: any) => ({
+        ...r,
+        whatsappLink: channels.includes('whatsapp') ? this.buildWhatsAppLink(r.phone, r.message) : '',
+        smsText: channels.includes('sms') ? String(r.message || '') : '',
+      })),
+      providerUsed: result.providerUsed,
+    };
+  }
+
+  async dispatchSupplierReorderDrafts(
+    shopId: string,
+    userId: string,
+    input?: { period?: 'daily' | 'weekly' | 'monthly' }
+  ) {
+    const planRes = await this.createReorderPurchasePlan(shopId, userId, {
+      period: input?.period || 'weekly',
+      maxItems: 20,
+      supplierStrategy: 'last_supplier',
+    });
+    if (!planRes.created || !planRes.plan) return { created: false, message: planRes.message, drafts: [] };
+
+    const plan = planRes.plan as any;
+    const drafts = (plan.supplierGroups || []).map((g: any) => {
+      const items = (plan.items || []).filter((i: any) => String(i.supplier_name || '') === String(g.supplierName || ''));
+      const message = this.normalizeCurrencyText(
+        [
+          `Purchase draft for ${g.supplierName}`,
+          `Shop: ${plan.shop_id}`,
+          `Items: ${Number(g.items || 0)}`,
+          `Estimated total: GHS ${Number(g.estimatedCost || 0).toFixed(2)}`,
+          ...items.slice(0, 8).map((i: any) => `- ${i.product_name}: qty ${Number(i.suggested_qty || 0)} (GHS ${Number(i.estimated_cost || 0).toFixed(2)})`),
+        ].join('\n')
+      );
+      return {
+        supplierName: g.supplierName,
+        items: Number(g.items || 0),
+        estimatedCost: Number(g.estimatedCost || 0),
+        message,
+      };
+    });
+
+    return {
+      created: true,
+      planId: plan.id,
+      period: plan.period,
+      drafts,
+    };
+  }
+
+  async dispatchCriticalRiskAlerts(
+    shopId: string,
+    userId: string,
+    input?: { channels?: Array<'whatsapp' | 'sms' | 'email'>; lookbackDays?: number }
+  ) {
+    const channels = input?.channels?.length ? input.channels : ['whatsapp', 'email'];
+    const [owner, risk] = await Promise.all([
+      this.getShopOwnerContact(shopId),
+      this.getRiskFraudInsights(shopId, Number(input?.lookbackDays || 30)),
+    ]);
+    const criticalAlerts = (risk.alerts || []).filter((a: any) => String(a.severity || '') === 'critical').slice(0, 8);
+    const text = this.normalizeCurrencyText(
+      [
+        `Critical risk alert summary (${risk.lookbackDays}d)`,
+        `Risk score: ${risk.riskScore}/100 (${risk.riskStatus})`,
+        ...criticalAlerts.map((a: any, idx: number) => `${idx + 1}. ${String(a.message || '')}`),
+        criticalAlerts.length ? 'Action: investigate immediately in Staff & Controls.' : 'No critical alerts currently.',
+      ].join('\n')
+    );
+
+    let emailSent = false;
+    if (channels.includes('email') && owner.ownerEmail && criticalAlerts.length > 0) {
+      emailSent = await sendGenericEmail({
+        to: owner.ownerEmail,
+        subject: `${owner.shopName} - Critical risk alerts`,
+        text,
+      });
+    }
+
+    return {
+      channels,
+      criticalCount: criticalAlerts.length,
+      message: text,
+      email: { to: owner.ownerEmail || null, sent: emailSent },
+      whatsapp: { link: channels.includes('whatsapp') ? this.buildWhatsAppLink(owner.ownerPhone, text) : '' },
+      sms: { text: channels.includes('sms') ? text : '' },
+      basedOn: { riskScore: risk.riskScore, provider: risk.providerUsed },
+    };
   }
 }

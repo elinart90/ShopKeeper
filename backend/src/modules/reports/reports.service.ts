@@ -893,22 +893,31 @@ export class ReportsService {
       this.getInventoryFinance(shopId, 30),
     ]);
 
+    const currentGrossProfit = Number((currentStats?.salesProfit ?? currentStats?.profit) || 0);
+    const previousGrossProfit = Number((previousStats?.salesProfit ?? previousStats?.profit) || 0);
+    const currentNetProfit = Number(currentStats?.profit || 0);
+    const previousNetProfit = Number(previousStats?.profit || 0);
+
     const comparison = {
       revenueNow: Number(currentStats?.totalSales || 0),
       revenuePrev: Number(previousStats?.totalSales || 0),
       revenueChangePercent: pctChange(Number(currentStats?.totalSales || 0), Number(previousStats?.totalSales || 0)),
-      profitNow: Number(currentStats?.profit || 0),
-      profitPrev: Number(previousStats?.profit || 0),
-      profitChangePercent: pctChange(Number(currentStats?.profit || 0), Number(previousStats?.profit || 0)),
+      // Keep "profit*" fields as gross profit for dashboard consistency with UI cards.
+      profitNow: currentGrossProfit,
+      profitPrev: previousGrossProfit,
+      profitChangePercent: pctChange(currentGrossProfit, previousGrossProfit),
+      netProfitNow: currentNetProfit,
+      netProfitPrev: previousNetProfit,
+      netProfitChangePercent: pctChange(currentNetProfit, previousNetProfit),
       txNow: Number(currentStats?.totalTransactions || 0),
       txPrev: Number(previousStats?.totalTransactions || 0),
       txChangePercent: pctChange(Number(currentStats?.totalTransactions || 0), Number(previousStats?.totalTransactions || 0)),
     };
 
     const todayVsYesterdayExplanation =
-      Number(currentIntel?.dailyComparison?.profitChangePercent || 0) < 0
-        ? 'Profit is down mainly due to lower revenue and/or higher expenses than yesterday.'
-        : 'Profit is stable or improving versus yesterday, supported by current sales performance.';
+      Number(comparison.profitChangePercent || 0) < 0
+        ? 'Gross profit is down versus the previous period, mainly due to weaker sales mix or lower margin items.'
+        : 'Gross profit is stable or improving versus the previous period, supported by current sales performance.';
 
     const trendDetection = {
       revenueTrend:
@@ -949,7 +958,8 @@ export class ReportsService {
       kpis: {
         sales: Number(currentStats?.totalSales || 0),
         expenses: Number(currentStats?.totalExpenses || 0),
-        profit: Number(currentStats?.profit || 0),
+        grossProfit: currentGrossProfit,
+        netProfit: currentNetProfit,
         transactions: Number(currentStats?.totalTransactions || 0),
       },
       topSellingProducts: (currentIntel?.topProducts || []).slice(0, 5),
@@ -967,6 +977,10 @@ ${JSON.stringify(snapshot, null, 2)}
 Currency rules:
 - Use GHS as the currency label.
 - Never use "$" or "USD".
+
+Terminology rules:
+- "Profit" means gross profit from sales (kpis.grossProfit) unless explicitly stated as net profit.
+- If mentioning net profit, label it clearly as "net profit".
 
 Return JSON only:
 {

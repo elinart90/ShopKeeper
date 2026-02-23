@@ -23,6 +23,7 @@ interface AuthContextType {
 export const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 const AUTH_STORAGE_KEY = 'shoopkeeper_auth';
+const SHOPS_CACHE_KEY_PREFIX = 'shoopkeeper_shops_cache_';
 
 type StoredAuth = { user: AuthUser; token: string };
 
@@ -137,11 +138,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const logout = () => {
+    const currentUserId = user?.id;
     setUser(null);
     setToken(null);
     setAuthToken('');
     clearStoredAuth();
     localStorage.removeItem('currentShopId');
+    if (currentUserId) {
+      localStorage.removeItem(`${SHOPS_CACHE_KEY_PREFIX}${currentUserId}`);
+    }
   };
 
   const refreshUser = async () => {

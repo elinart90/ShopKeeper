@@ -17,7 +17,9 @@ import dailyCloseRoutes from './modules/daily-close/daily-close.routes';
 import paymentsRoutes from './modules/payments/payments.routes';
 import subscriptionsRoutes from './modules/subscriptions/subscriptions.routes';
 import controlsRoutes from './modules/controls/controls.routes';
+import adminRoutes from './modules/admin/admin.routes';
 import { paystackWebhook } from './modules/payments/webhook.paystack';
+import { apiAccessLogger } from './middleware/apiAccessLogger';
 
 const app = express();
 
@@ -54,6 +56,7 @@ app.get('/api/health', (req, res) => {
 });
 
 // API Routes
+app.use('/api', apiAccessLogger);
 app.use('/api/auth', authRoutes);
 app.use('/api/shops', shopsRoutes);
 app.use('/api/inventory', inventoryRoutes);
@@ -67,6 +70,7 @@ app.use('/api/daily-close', dailyCloseRoutes);
 app.use('/api/payments', paymentsRoutes);
 app.use('/api/subscriptions', subscriptionsRoutes);
 app.use('/api/controls', controlsRoutes);
+app.use('/api/admin', adminRoutes);
 
 // Error handling
 app.use(errorHandler);

@@ -102,7 +102,7 @@ export default function SubscriptionPage() {
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-6">
       <div className="max-w-5xl mx-auto">
         <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-6 mb-6">
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Choose a monthly plan</h1>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Choose a plan</h1>
           <p className="text-gray-600 dark:text-gray-400 mt-2">
             An active subscription is required to use ShoopKeeper.
           </p>

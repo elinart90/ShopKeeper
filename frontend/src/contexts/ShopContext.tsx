@@ -27,21 +27,26 @@ interface ShopContextType {
 
 export const ShopContext = createContext<ShopContextType | undefined>(undefined);
 
-// Cache shops in localStorage
-const SHOPS_CACHE_KEY = 'shoopkeeper_shops_cache';
+// Cache shops in localStorage per user to prevent role/shop leakage across accounts.
+const SHOPS_CACHE_KEY_PREFIX = 'shoopkeeper_shops_cache_';
+const LEGACY_SHOPS_CACHE_KEY = 'shoopkeeper_shops_cache';
 
-function getCachedShops(): Shop[] {
+function cacheKeyForUser(userId?: string) {
+  return `${SHOPS_CACHE_KEY_PREFIX}${String(userId || 'anonymous')}`;
+}
+
+function getCachedShops(userId?: string): Shop[] {
   try {
-    const cached = localStorage.getItem(SHOPS_CACHE_KEY);
+    const cached = localStorage.getItem(cacheKeyForUser(userId));
     return cached ? JSON.parse(cached) : [];
   } catch {
     return [];
   }
 }
 
-function setCachedShops(shops: Shop[]) {
+function setCachedShops(userId: string | undefined, shops: Shop[]) {
   try {
-    localStorage.setItem(SHOPS_CACHE_KEY, JSON.stringify(shops));
+    localStorage.setItem(cacheKeyForUser(userId), JSON.stringify(shops));
   } catch (err) {
     console.warn('Failed to cache shops', err);
   }
@@ -85,7 +90,7 @@ export function ShopProvider({ children }: { children: ReactNode }) {
       // CRITICAL FIX: If offline, use cached shops
       if (!navigator.onLine) {
         console.log('📴 Offline - loading shops from cache');
-        const cachedShops = getCachedShops();
+        const cachedShops = getCachedShops(user?.id);
         setShops(cachedShops);
         
         const savedShopId = getShopId();
@@ -105,7 +110,7 @@ export function ShopProvider({ children }: { children: ReactNode }) {
       const response = await shopsApi.getMyShops();
       const userShops = response.data.data || [];
       setShops(userShops);
-      setCachedShops(userShops); // Cache for offline use
+      setCachedShops(user?.id, userShops); // Cache for offline use
 
       const savedShopId = getShopId();
       const shopToSelect = savedShopId
@@ -130,7 +135,7 @@ export function ShopProvider({ children }: { children: ReactNode }) {
       } else {
         // Network error or other error - use cached shops
         console.log('📴 Failed to fetch shops - using cache');
-        const cachedShops = getCachedShops();
+        const cachedShops = getCachedShops(user?.id);
         if (cachedShops.length > 0) {
           setShops(cachedShops);
           const savedShopId = getShopId();
@@ -155,6 +160,8 @@ export function ShopProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (authLoading) return;
+    // Remove legacy shared cache key so old owner cache cannot leak to other users.
+    localStorage.removeItem(LEGACY_SHOPS_CACHE_KEY);
     if (!user) {
       setShops([]);
       setCurrentShop(null);

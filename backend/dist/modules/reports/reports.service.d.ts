@@ -245,6 +245,9 @@ export declare class ReportsService {
                 profitNow: number;
                 profitPrev: number;
                 profitChangePercent: number;
+                netProfitNow: number;
+                netProfitPrev: number;
+                netProfitChangePercent: number;
                 txNow: number;
                 txPrev: number;
                 txChangePercent: number;
@@ -252,7 +255,8 @@ export declare class ReportsService {
             kpis: {
                 sales: number;
                 expenses: number;
-                profit: number;
+                grossProfit: number;
+                netProfit: number;
                 transactions: number;
             };
             topSellingProducts: {

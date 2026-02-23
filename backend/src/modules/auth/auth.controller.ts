@@ -33,7 +33,11 @@ export class AuthController {
         throw new AppError('Email and password are required', 400);
       }
 
-      const result = await authService.login(email, password);
+      const result = await authService.login(email, password, {
+        ipAddress: req.ip,
+        userAgent: req.headers['user-agent'] || null,
+        deviceFingerprint: (req.headers['x-device-id'] as string) || null,
+      });
 
       res.json({
         success: true,
@@ -56,6 +60,16 @@ export class AuthController {
         success: true,
         data: user,
       });
+    } catch (error) {
+      errorHandler(error as AppError, req, res, next);
+    }
+  }
+
+  async platformAdminStatus(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.userId) throw new AppError('Unauthorized', 401);
+      const data = await authService.getPlatformAdminStatus(req.userId);
+      res.json({ success: true, data });
     } catch (error) {
       errorHandler(error as AppError, req, res, next);
     }

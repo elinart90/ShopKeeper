@@ -1,0 +1,57 @@
+export const ADMIN_SCOPES = {
+  ALL: '*',
+  DASHBOARD_READ: 'admin.dashboard.read',
+  PLATFORM_ADMINS_READ: 'admin.platform_admins.read',
+  PLATFORM_ADMINS_MANAGE: 'admin.platform_admins.manage',
+  USERS_READ: 'admin.users.read',
+  USERS_MANAGE: 'admin.users.manage',
+  SHOPS_READ: 'admin.shops.read',
+  SHOPS_MANAGE: 'admin.shops.manage',
+  WORKERS_READ: 'admin.workers.read',
+  WORKERS_MANAGE: 'admin.workers.manage',
+  ANALYTICS_READ: 'admin.analytics.read',
+  BILLING_READ: 'admin.billing.read',
+  MONETIZATION_READ: 'admin.monetization.read',
+  MONETIZATION_MANAGE: 'admin.monetization.manage',
+  AUDIT_READ: 'admin.audit.read',
+  AUDIT_WRITE: 'admin.audit.write',
+  SECURITY_READ: 'admin.security.read',
+  SECURITY_MANAGE: 'admin.security.manage',
+  PRIVACY_MANAGE: 'admin.privacy.manage',
+  ANNOUNCEMENTS_READ: 'admin.announcements.read',
+  ANNOUNCEMENTS_MANAGE: 'admin.announcements.manage',
+} as const;
+
+export type AdminScope = (typeof ADMIN_SCOPES)[keyof typeof ADMIN_SCOPES];
+export type AdminRole = 'super_admin' | 'admin_analyst' | 'admin_operator';
+
+export const ADMIN_ROLE_SCOPES: Record<AdminRole, AdminScope[]> = {
+  super_admin: [ADMIN_SCOPES.ALL],
+  admin_analyst: [
+    ADMIN_SCOPES.DASHBOARD_READ,
+    ADMIN_SCOPES.PLATFORM_ADMINS_READ,
+    ADMIN_SCOPES.USERS_READ,
+    ADMIN_SCOPES.SHOPS_READ,
+    ADMIN_SCOPES.WORKERS_READ,
+    ADMIN_SCOPES.ANALYTICS_READ,
+    ADMIN_SCOPES.BILLING_READ,
+    ADMIN_SCOPES.MONETIZATION_READ,
+    ADMIN_SCOPES.AUDIT_READ,
+    ADMIN_SCOPES.SECURITY_READ,
+    ADMIN_SCOPES.ANNOUNCEMENTS_READ,
+  ],
+  admin_operator: [
+    ADMIN_SCOPES.DASHBOARD_READ,
+    ADMIN_SCOPES.PLATFORM_ADMINS_READ,
+    ADMIN_SCOPES.USERS_MANAGE,
+    ADMIN_SCOPES.SHOPS_MANAGE,
+    ADMIN_SCOPES.WORKERS_MANAGE,
+    ADMIN_SCOPES.MONETIZATION_READ,
+    ADMIN_SCOPES.MONETIZATION_MANAGE,
+    ADMIN_SCOPES.ANNOUNCEMENTS_MANAGE,
+    ADMIN_SCOPES.AUDIT_READ,
+    ADMIN_SCOPES.AUDIT_WRITE,
+    ADMIN_SCOPES.SECURITY_READ,
+    ADMIN_SCOPES.SECURITY_MANAGE,
+  ],
+};

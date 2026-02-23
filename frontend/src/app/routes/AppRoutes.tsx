@@ -20,8 +20,19 @@ import SubscriptionPage from "../../features/subscriptions/pages/SubscriptionPag
 import SubscriptionCallbackPage from "../../features/subscriptions/pages/SubscriptionCallbackPage";
 import NotFoundPage from "../../features/error/pages/NotFoundPage";
 import SyncCenterPage from "../../features/sync/pages/SyncCenterPage";
+import SuperAdminLayout from "../../features/admin/pages/SuperAdminLayout";
+import AdminOverviewPage from "../../features/admin/pages/AdminOverviewPage";
+import AdminUsersPage, { AdminAiIntelligencePage } from "../../features/admin/pages/AdminUsersPage";
+import AdminTransactionsPage from "../../features/admin/pages/AdminTransactionsPage";
+import AdminUserDetailPage from "../../features/admin/pages/AdminUserDetailPage";
+import AdminShopsPage from "../../features/admin/pages/AdminShopsPage";
+import AdminShopDetailPage from "../../features/admin/pages/AdminShopDetailPage";
+import AdminAuditLogsPage from "../../features/admin/pages/AdminAuditLogsPage";
+import AdminSecurityPage from "../../features/admin/pages/AdminSecurityPage";
+import AdminMonetizationPage from "../../features/admin/pages/AdminMonetizationPage";
+import RequireSuperAdmin from "../../features/admin/components/RequireSuperAdmin";
 import { useAuth } from "../../contexts/useAuth";
-import { subscriptionsApi } from "../../lib/api";
+import { authApi, shopsApi, subscriptionsApi } from "../../lib/api";
 import type { ReactElement } from "react";
 import { useEffect, useState } from "react";
 
@@ -59,19 +70,45 @@ function RequireSubscription({ children }: { children: ReactElement }) {
     }
 
     setChecking(true);
-    subscriptionsApi
-      .getStatus()
-      .then((res) => {
+    (async () => {
+      try {
+        // Determine owner-vs-member from actual shop membership, not global users.role.
+        // This avoids stale global role values forcing staff into subscription flow.
+        const shopsRes = await shopsApi.getMyShops();
         if (!active) return;
-        setHasActiveSubscription(!!res.data?.data?.isActive);
-      })
-      .catch(() => {
+        const myShops = (shopsRes.data?.data || []) as Array<{ role?: string }>;
+        const actsAsOwner = myShops.some((s) => String(s?.role || "").toLowerCase() === "owner");
+        if (!actsAsOwner) {
+          setHasActiveSubscription(true);
+          return;
+        }
+
+        const res = await subscriptionsApi.getStatus();
         if (!active) return;
-        setHasActiveSubscription(false);
-      })
-      .finally(() => {
+        const isActive = !!res.data?.data?.isActive;
+        if (isActive) {
+          setHasActiveSubscription(true);
+          return;
+        }
+        // Super-admins are exempt from subscription gating.
+        const adminStatus = await authApi.getPlatformAdminStatus();
+        if (!active) return;
+        setHasActiveSubscription(!!adminStatus.data?.data?.isPlatformAdmin);
+      } catch {
+        if (!active) return;
+        try {
+          // If subscription status call fails, still allow active super-admins.
+          const adminStatus = await authApi.getPlatformAdminStatus();
+          if (!active) return;
+          setHasActiveSubscription(!!adminStatus.data?.data?.isPlatformAdmin);
+        } catch {
+          if (!active) return;
+          setHasActiveSubscription(false);
+        }
+      } finally {
         if (active) setChecking(false);
-      });
+      }
+    })();
 
     return () => {
       active = false;
@@ -230,6 +267,27 @@ export default function AppRoutes() {
             </RequireAppAccess>
           }
         />
+
+        {/* Super admin area */}
+        <Route
+          path="/super-admin"
+          element={
+            <RequireSuperAdmin>
+              <SuperAdminLayout />
+            </RequireSuperAdmin>
+          }
+        >
+          <Route index element={<AdminOverviewPage />} />
+          <Route path="ai-intelligence" element={<AdminAiIntelligencePage />} />
+          <Route path="users" element={<AdminUsersPage />} />
+          <Route path="transactions" element={<AdminTransactionsPage />} />
+          <Route path="users/:id" element={<AdminUserDetailPage />} />
+          <Route path="shops" element={<AdminShopsPage />} />
+          <Route path="shops/:id" element={<AdminShopDetailPage />} />
+          <Route path="security" element={<AdminSecurityPage />} />
+          <Route path="monetization" element={<AdminMonetizationPage />} />
+          <Route path="audit-logs" element={<AdminAuditLogsPage />} />
+        </Route>
         
         {/* Fallback */}
         <Route path="*" element={<NotFoundPage />} />

@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.sendPasswordResetPinEmail = sendPasswordResetPinEmail;
 exports.sendClearDataPinEmail = sendClearDataPinEmail;
+exports.sendGenericEmail = sendGenericEmail;
 const nodemailer_1 = __importDefault(require("nodemailer"));
 const env_1 = require("../config/env");
 const logger_1 = require("./logger");
@@ -79,6 +80,28 @@ async function sendClearDataPinEmail(to, pin) {
     }
     catch (err) {
         logger_1.logger.error('Failed to send PIN email:', err);
+        return false;
+    }
+}
+/**
+ * Generic email helper for operational notifications.
+ */
+async function sendGenericEmail(params) {
+    const transport = getTransporter();
+    if (!transport)
+        return false;
+    try {
+        await transport.sendMail({
+            from: env_1.env.email.from,
+            to: params.to,
+            subject: params.subject,
+            text: params.text,
+            html: params.html || `<pre style="font-family:inherit;white-space:pre-wrap;">${params.text}</pre>`,
+        });
+        return true;
+    }
+    catch (err) {
+        logger_1.logger.error('Failed to send generic email:', err);
         return false;
     }
 }
