@@ -1,17 +1,25 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { adminApi } from '../../../lib/api';
+import { adminApi, type AdminUserRow, type AdminUserWorkspaceData } from '../../../lib/api';
 import AdminStatusBadge from '../components/AdminStatusBadge';
 import AdminDataTable from '../components/AdminDataTable';
 import AdminConfirmActionModal from '../components/AdminConfirmActionModal';
+
+type LoginHistoryRow = {
+  id: string;
+  created_at: string;
+  ip_address?: string | null;
+  user_agent?: string | null;
+  success: boolean;
+};
 
 export default function AdminUserDetailPage() {
   const { id = '' } = useParams();
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [user, setUser] = useState<any>(null);
-  const [history, setHistory] = useState<any[]>([]);
-  const [workspace, setWorkspace] = useState<any>({
+  const [user, setUser] = useState<AdminUserRow | null>(null);
+  const [history, setHistory] = useState<LoginHistoryRow[]>([]);
+  const [workspace, setWorkspace] = useState<AdminUserWorkspaceData>({
     ownedShops: [],
     managedUsers: [],
     sales: [],
@@ -165,7 +173,7 @@ export default function AdminUserDetailPage() {
 
       <div className="space-y-2">
         <h2 className="text-sm font-semibold text-gray-900 dark:text-white">Login History</h2>
-        <AdminDataTable
+        <AdminDataTable<LoginHistoryRow>
           rows={history}
           rowKey={(r) => r.id}
           columns={[
@@ -179,7 +187,7 @@ export default function AdminUserDetailPage() {
 
       <div className="space-y-2">
         <h2 className="text-sm font-semibold text-gray-900 dark:text-white">Shops Created By This User</h2>
-        <AdminDataTable
+        <AdminDataTable<AdminUserWorkspaceData['ownedShops'][number]>
           rows={workspace?.ownedShops || []}
           rowKey={(r) => r.id}
           emptyText="No owned shops."
@@ -193,7 +201,7 @@ export default function AdminUserDetailPage() {
 
       <div className="space-y-2">
         <h2 className="text-sm font-semibold text-gray-900 dark:text-white">Users Under This Owner/Admin</h2>
-        <AdminDataTable
+        <AdminDataTable<AdminUserWorkspaceData['managedUsers'][number]>
           rows={workspace?.managedUsers || []}
           rowKey={(r) => `${r.shopId}-${r.userId}`}
           emptyText="No managed users."
@@ -223,7 +231,7 @@ export default function AdminUserDetailPage() {
 
       <div className="space-y-2">
         <h2 className="text-sm font-semibold text-gray-900 dark:text-white">Daily Sales Summary (Owned Shops)</h2>
-        <AdminDataTable
+        <AdminDataTable<AdminUserWorkspaceData['dailySales'][number]>
           rows={workspace?.dailySales || []}
           rowKey={(r) => r.date}
           emptyText="No sales for selected range."
@@ -237,7 +245,7 @@ export default function AdminUserDetailPage() {
 
       <div className="space-y-2">
         <h2 className="text-sm font-semibold text-gray-900 dark:text-white">Sales (Cancel Enabled)</h2>
-        <AdminDataTable
+        <AdminDataTable<AdminUserWorkspaceData['sales'][number]>
           rows={workspace?.sales || []}
           rowKey={(r) => r.id}
           emptyText="No sales found."

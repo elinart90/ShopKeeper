@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { adminApi } from '../../../lib/api';
+import { adminApi, type AdminShopRow } from '../../../lib/api';
 import AdminDataTable from '../components/AdminDataTable';
 import AdminStatusBadge from '../components/AdminStatusBadge';
 import AdminFiltersBar from '../components/AdminFiltersBar';
@@ -14,8 +14,14 @@ const PLAN_LABELS: Record<string, string> = {
 
 export default function AdminShopsPage() {
   const [loading, setLoading] = useState(true);
-  const [rows, setRows] = useState<any[]>([]);
-  const [query, setQuery] = useState({
+  const [rows, setRows] = useState<AdminShopRow[]>([]);
+  const [query, setQuery] = useState<{
+    search: string;
+    plan: '' | 'small' | 'medium' | 'big' | 'enterprise';
+    active: '' | 'true' | 'false';
+    page: number;
+    limit: number;
+  }>({
     search: '',
     plan: '',
     active: '',
@@ -54,7 +60,12 @@ export default function AdminShopsPage() {
         />
         <select
           value={query.plan}
-          onChange={(e) => setQuery((s) => ({ ...s, plan: e.target.value }))}
+          onChange={(e) =>
+            setQuery((s) => ({
+              ...s,
+              plan: e.target.value as '' | 'small' | 'medium' | 'big' | 'enterprise',
+            }))
+          }
           className="rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-700"
         >
           <option value="">All plans</option>
@@ -65,7 +76,12 @@ export default function AdminShopsPage() {
         </select>
         <select
           value={query.active}
-          onChange={(e) => setQuery((s) => ({ ...s, active: e.target.value }))}
+          onChange={(e) =>
+            setQuery((s) => ({
+              ...s,
+              active: e.target.value as '' | 'true' | 'false',
+            }))
+          }
           className="rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-700"
         >
           <option value="">All active states</option>
@@ -74,7 +90,7 @@ export default function AdminShopsPage() {
         </select>
       </AdminFiltersBar>
 
-      <AdminDataTable
+      <AdminDataTable<AdminShopRow>
         rows={rows}
         rowKey={(r) => r.id}
         emptyText={loading ? 'Loading shops...' : 'No shops found.'}

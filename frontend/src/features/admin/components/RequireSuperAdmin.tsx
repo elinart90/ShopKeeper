@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
+import type { ReactNode } from 'react';
 import { useAuth } from '../../../contexts/useAuth';
 import { adminApi } from '../../../lib/api';
 
 type RequireSuperAdminProps = {
-  children: JSX.Element;
+  children: ReactNode;
 };
 
 export default function RequireSuperAdmin({ children }: RequireSuperAdminProps) {

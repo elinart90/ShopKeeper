@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { adminApi, type AdminCommissionSummaryData, type AdminMonetizationBillingRow, type AdminRevenueForecastData } from '../../../lib/api';
 
+type PlanCode = 'small' | 'medium' | 'big' | 'enterprise';
+
 export default function AdminMonetizationPage() {
   const [loading, setLoading] = useState(true);
   const [billingRows, setBillingRows] = useState<AdminMonetizationBillingRow[]>([]);
@@ -9,7 +11,11 @@ export default function AdminMonetizationPage() {
   const [forecast, setForecast] = useState<AdminRevenueForecastData | null>(null);
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState({ search: '', overdueOnly: false });
-  const [planForm, setPlanForm] = useState({ userId: '', planCode: 'small', billingCycle: 'monthly' as 'monthly' | 'yearly' });
+  const [planForm, setPlanForm] = useState<{ userId: string; planCode: PlanCode; billingCycle: 'monthly' | 'yearly' }>({
+    userId: '',
+    planCode: 'small',
+    billingCycle: 'monthly',
+  });
   const [promoForm, setPromoForm] = useState({ code: '', discountType: 'percent' as 'percent' | 'fixed', discountValue: 10, trialExtensionDays: 0, maxRedemptions: 100 });
   const [applyPromoForm, setApplyPromoForm] = useState({ userId: '', code: '' });
   const [commissionRate, setCommissionRate] = useState(1.5);
@@ -170,13 +176,21 @@ export default function AdminMonetizationPage() {
               onChange={(e) => setPlanForm((s) => ({ ...s, userId: e.target.value }))}
               className="rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-700"
             />
-            <select value={planForm.planCode} onChange={(e) => setPlanForm((s) => ({ ...s, planCode: e.target.value as any }))} className="rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-700">
+            <select
+              value={planForm.planCode}
+              onChange={(e) => setPlanForm((s) => ({ ...s, planCode: e.target.value as PlanCode }))}
+              className="rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-700"
+            >
               <option value="small">small</option>
               <option value="medium">medium</option>
               <option value="big">big</option>
               <option value="enterprise">enterprise</option>
             </select>
-            <select value={planForm.billingCycle} onChange={(e) => setPlanForm((s) => ({ ...s, billingCycle: e.target.value as any }))} className="rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-700">
+            <select
+              value={planForm.billingCycle}
+              onChange={(e) => setPlanForm((s) => ({ ...s, billingCycle: e.target.value as 'monthly' | 'yearly' }))}
+              className="rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-700"
+            >
               <option value="monthly">monthly</option>
               <option value="yearly">yearly</option>
             </select>

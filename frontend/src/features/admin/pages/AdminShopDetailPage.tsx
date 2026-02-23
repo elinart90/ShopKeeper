@@ -1,14 +1,31 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { adminApi } from '../../../lib/api';
+import { adminApi, type AdminShopRow } from '../../../lib/api';
 import AdminStatusBadge from '../components/AdminStatusBadge';
 import AdminDataTable from '../components/AdminDataTable';
+
+type AdminShopDetailModel = AdminShopRow & {
+  owner?: { id: string; name: string; email: string } | null;
+};
+
+type DrilldownData = {
+  membersCount: number;
+  recentSales: Array<Record<string, unknown>>;
+};
+
+type RecentSaleRow = {
+  id: string;
+  sale_number?: string;
+  final_amount?: number;
+  payment_method?: string;
+  created_at?: string;
+};
 
 export default function AdminShopDetailPage() {
   const { id = '' } = useParams();
   const [loading, setLoading] = useState(true);
-  const [shop, setShop] = useState<any>(null);
-  const [drilldown, setDrilldown] = useState<any>(null);
+  const [shop, setShop] = useState<AdminShopDetailModel | null>(null);
+  const [drilldown, setDrilldown] = useState<DrilldownData | null>(null);
 
   const formatPlanLabel = (code?: string | null) => {
     const normalized = String(code || '').toLowerCase();
@@ -34,6 +51,16 @@ export default function AdminShopDetailPage() {
   useEffect(() => {
     load();
   }, [id]);
+
+  const recentSales: RecentSaleRow[] = (drilldown?.recentSales || [])
+    .map((row) => ({
+      id: String(row.id || ''),
+      sale_number: row.sale_number ? String(row.sale_number) : undefined,
+      final_amount: Number(row.final_amount || 0),
+      payment_method: row.payment_method ? String(row.payment_method) : undefined,
+      created_at: row.created_at ? String(row.created_at) : undefined,
+    }))
+    .filter((row) => !!row.id);
 
   if (loading && !shop) {
     return <p className="text-sm text-gray-500 dark:text-gray-400">Loading shop...</p>;
@@ -86,15 +113,15 @@ export default function AdminShopDetailPage() {
         </p>
       </div>
 
-      <AdminDataTable
-        rows={drilldown?.recentSales || []}
+      <AdminDataTable<RecentSaleRow>
+        rows={recentSales}
         rowKey={(r) => r.id}
         emptyText="No recent sales."
         columns={[
           { key: 'sale', header: 'Sale #', render: (r) => r.sale_number || '-' },
           { key: 'amount', header: 'Amount', render: (r) => `GHS ${Number(r.final_amount || 0).toLocaleString()}` },
           { key: 'payment', header: 'Payment', render: (r) => r.payment_method || '-' },
-          { key: 'time', header: 'Time', render: (r) => new Date(r.created_at).toLocaleString() },
+          { key: 'time', header: 'Time', render: (r) => (r.created_at ? new Date(r.created_at).toLocaleString() : '-') },
         ]}
       />
     </div>
