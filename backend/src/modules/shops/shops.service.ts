@@ -13,6 +13,82 @@ const authService = new AuthService();
 const STAFF_ROLES = ['manager', 'cashier', 'staff'] as const;
 
 export class ShopsService {
+  private isMissingBillingCycleColumn(error: unknown): boolean {
+    const e = error as { code?: string; message?: string };
+    return e?.code === '42703' && String(e?.message || '').includes('billing_cycle');
+  }
+
+  private async readSubscriptionForTransfer(userId: string) {
+    const withCycle = await supabase
+      .from('user_subscriptions')
+      .select(
+        'plan_code, amount, currency, status, billing_cycle, current_period_start, current_period_end, cancelled_at, last_payment_reference'
+      )
+      .eq('user_id', userId)
+      .maybeSingle();
+    if (withCycle.error) {
+      if (!this.isMissingBillingCycleColumn(withCycle.error)) {
+        logger.error('Error reading owner subscription for ownership transfer:', withCycle.error);
+        throw new Error('Failed to validate owner subscription for transfer');
+      }
+      const legacy = await supabase
+        .from('user_subscriptions')
+        .select('plan_code, amount, currency, status, current_period_start, current_period_end, cancelled_at, last_payment_reference')
+        .eq('user_id', userId)
+        .maybeSingle();
+      if (legacy.error) {
+        logger.error('Error reading legacy owner subscription for ownership transfer:', legacy.error);
+        throw new Error('Failed to validate owner subscription for transfer');
+      }
+      return { row: legacy.data as Record<string, any> | null, hasBillingCycle: false };
+    }
+    return { row: withCycle.data as Record<string, any> | null, hasBillingCycle: true };
+  }
+
+  private async carryOwnerSubscriptionToNewOwner(currentOwnerUserId: string, newOwnerUserId: string) {
+    const { row: ownerSub, hasBillingCycle } = await this.readSubscriptionForTransfer(currentOwnerUserId);
+    if (!ownerSub) {
+      throw new Error('Current owner has no subscription to transfer');
+    }
+
+    const normalizedStatus = String(ownerSub.status || '').toLowerCase();
+    if (normalizedStatus !== 'active') {
+      throw new Error('Current owner subscription is not active; cannot transfer ownership plan');
+    }
+
+    const payloadBase: Record<string, unknown> = {
+      user_id: newOwnerUserId,
+      plan_code: ownerSub.plan_code,
+      amount: Number(ownerSub.amount || 0),
+      currency: String(ownerSub.currency || 'GHS'),
+      status: 'active',
+      current_period_start: ownerSub.current_period_start || null,
+      current_period_end: ownerSub.current_period_end || null,
+      cancelled_at: null,
+      last_payment_reference: ownerSub.last_payment_reference || null,
+      updated_at: new Date().toISOString(),
+    };
+
+    if (hasBillingCycle) {
+      const payloadWithCycle = {
+        ...payloadBase,
+        billing_cycle: ownerSub.billing_cycle === 'yearly' ? 'yearly' : 'monthly',
+      };
+      const { error } = await supabase.from('user_subscriptions').upsert(payloadWithCycle, { onConflict: 'user_id' });
+      if (!error) return;
+      if (!this.isMissingBillingCycleColumn(error)) {
+        logger.error('Error carrying owner subscription (with billing cycle):', error);
+        throw new Error('Failed to transfer owner subscription plan');
+      }
+    }
+
+    const { error: legacyError } = await supabase.from('user_subscriptions').upsert(payloadBase, { onConflict: 'user_id' });
+    if (legacyError) {
+      logger.error('Error carrying owner subscription (legacy):', legacyError);
+      throw new Error('Failed to transfer owner subscription plan');
+    }
+  }
+
   async createShop(userId: string, data: any) {
     const validated = shopSchema.parse(data);
 
@@ -257,6 +333,10 @@ export class ShopsService {
       .eq('id', newOwnerUserId)
       .maybeSingle();
     if (!newOwnerUser) throw new Error('New owner user not found');
+
+    // Option B: new owner continues the current owner's active plan entitlement.
+    // We copy the active owner subscription row to the new owner before ownership switch.
+    await this.carryOwnerSubscriptionToNewOwner(requesterUserId, newOwnerUserId);
 
     const { error: updateErr } = await supabase
       .from('shops')

@@ -14,17 +14,23 @@ function getTransporter() {
     if (transporter)
         return transporter;
     const { email } = env_1.env;
-    if (!email.user || !email.password) {
+    const normalizedUser = String(email.user || '').trim();
+    let normalizedPassword = String(email.password || '').trim();
+    // Gmail app passwords are often copied with spaces every 4 chars.
+    if (/gmail\.com/i.test(String(email.host || ''))) {
+        normalizedPassword = normalizedPassword.replace(/\s+/g, '');
+    }
+    if (!normalizedUser || !normalizedPassword) {
         logger_1.logger.warn('Email not configured (EMAIL_USER/EMAIL_PASSWORD missing). PIN emails will not be sent.');
         return null;
     }
     transporter = nodemailer_1.default.createTransport({
-        host: email.host,
-        port: email.port,
+        host: String(email.host || '').trim(),
+        port: Number(email.port || 587),
         secure: email.secure,
         auth: {
-            user: email.user,
-            pass: email.password,
+            user: normalizedUser,
+            pass: normalizedPassword,
         },
     });
     return transporter;

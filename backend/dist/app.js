@@ -21,7 +21,9 @@ const daily_close_routes_1 = __importDefault(require("./modules/daily-close/dail
 const payments_routes_1 = __importDefault(require("./modules/payments/payments.routes"));
 const subscriptions_routes_1 = __importDefault(require("./modules/subscriptions/subscriptions.routes"));
 const controls_routes_1 = __importDefault(require("./modules/controls/controls.routes"));
+const admin_routes_1 = __importDefault(require("./modules/admin/admin.routes"));
 const webhook_paystack_1 = require("./modules/payments/webhook.paystack");
+const apiAccessLogger_1 = require("./middleware/apiAccessLogger");
 const app = (0, express_1.default)();
 // Middleware - allow frontend dev server, configured URL, and LAN IPs (for phone testing)
 app.use((0, cors_1.default)({
@@ -54,6 +56,7 @@ app.get('/api/health', (req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 // API Routes
+app.use('/api', apiAccessLogger_1.apiAccessLogger);
 app.use('/api/auth', auth_routes_1.default);
 app.use('/api/shops', shops_routes_1.default);
 app.use('/api/inventory', inventory_routes_1.default);
@@ -67,6 +70,7 @@ app.use('/api/daily-close', daily_close_routes_1.default);
 app.use('/api/payments', payments_routes_1.default);
 app.use('/api/subscriptions', subscriptions_routes_1.default);
 app.use('/api/controls', controls_routes_1.default);
+app.use('/api/admin', admin_routes_1.default);
 // Error handling
 app.use(errorHandler_1.errorHandler);
 exports.default = app;

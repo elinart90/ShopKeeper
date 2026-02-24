@@ -27,7 +27,11 @@ class AuthController {
             if (!email || !password) {
                 throw new errorHandler_1.AppError('Email and password are required', 400);
             }
-            const result = await authService.login(email, password);
+            const result = await authService.login(email, password, {
+                ipAddress: req.ip,
+                userAgent: req.headers['user-agent'] || null,
+                deviceFingerprint: req.headers['x-device-id'] || null,
+            });
             res.json({
                 success: true,
                 data: result,
@@ -47,6 +51,17 @@ class AuthController {
                 success: true,
                 data: user,
             });
+        }
+        catch (error) {
+            (0, errorHandler_1.errorHandler)(error, req, res, next);
+        }
+    }
+    async platformAdminStatus(req, res, next) {
+        try {
+            if (!req.userId)
+                throw new errorHandler_1.AppError('Unauthorized', 401);
+            const data = await authService.getPlatformAdminStatus(req.userId);
+            res.json({ success: true, data });
         }
         catch (error) {
             (0, errorHandler_1.errorHandler)(error, req, res, next);

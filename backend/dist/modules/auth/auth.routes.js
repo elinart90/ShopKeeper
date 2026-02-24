@@ -11,6 +11,7 @@ router.post('/forgot-password-request', (req, res, next) => controller.forgotPas
 router.post('/verify-forgot-password-pin', (req, res, next) => controller.verifyForgotPasswordPin(req, res, next));
 router.post('/forgot-password-reset', (req, res, next) => controller.forgotPasswordReset(req, res, next));
 router.get('/me', requireAuth_1.requireAuth, (req, res, next) => controller.me(req, res, next));
+router.get('/platform-admin-status', requireAuth_1.requireAuth, (req, res, next) => controller.platformAdminStatus(req, res, next));
 router.patch('/me', requireAuth_1.requireAuth, (req, res, next) => controller.updateProfile(req, res, next));
 router.post('/change-password', requireAuth_1.requireAuth, (req, res, next) => controller.changePassword(req, res, next));
 exports.default = router;

@@ -122,51 +122,9 @@ class SubscriptionsService {
             currentPeriodEnd: periodEnd,
         };
     }
-    async getStatus(userId, shopId) {
-        if (shopId) {
-            const { data: shop, error: shopErr } = await supabase_1.supabase
-                .from('shops')
-                .select('owner_id')
-                .eq('id', shopId)
-                .maybeSingle();
-            if (!shopErr && shop?.owner_id && String(shop.owner_id) !== userId) {
-                const ownerId = String(shop.owner_id);
-                const ownerRow = await this.readSubscriptionRow(ownerId);
-                return this.buildStatusFromRow(ownerId, ownerRow);
-            }
-        }
+    async getStatus(userId) {
         const ownRow = await this.readSubscriptionRow(userId);
-        const ownStatus = await this.buildStatusFromRow(userId, ownRow);
-        if (ownStatus.isActive)
-            return ownStatus;
-        const { data: memberships, error: memberErr } = await supabase_1.supabase
-            .from('shop_members')
-            .select('shop_id')
-            .eq('user_id', userId);
-        if (memberErr || !memberships || memberships.length === 0) {
-            return ownStatus;
-        }
-        const shopIds = memberships
-            .map((m) => (m?.shop_id ? String(m.shop_id) : ''))
-            .filter(Boolean);
-        if (shopIds.length === 0)
-            return ownStatus;
-        const { data: shops, error: shopsErr } = await supabase_1.supabase
-            .from('shops')
-            .select('id, owner_id')
-            .in('id', shopIds);
-        if (shopsErr || !shops || shops.length === 0)
-            return ownStatus;
-        const ownerIds = Array.from(new Set(shops
-            .map((s) => (s?.owner_id ? String(s.owner_id) : ''))
-            .filter((id) => !!id && id !== userId)));
-        for (const ownerId of ownerIds) {
-            const ownerRow = await this.readSubscriptionRow(ownerId);
-            const ownerStatus = await this.buildStatusFromRow(ownerId, ownerRow);
-            if (ownerStatus.isActive)
-                return ownerStatus;
-        }
-        return ownStatus;
+        return this.buildStatusFromRow(userId, ownRow);
     }
     async initialize(userId, email, planCode, billingCycle = 'monthly') {
         const plan = this.getPlan(planCode);

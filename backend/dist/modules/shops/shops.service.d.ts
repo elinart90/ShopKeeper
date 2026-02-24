@@ -1,4 +1,7 @@
 export declare class ShopsService {
+    private isMissingBillingCycleColumn;
+    private readSubscriptionForTransfer;
+    private carryOwnerSubscriptionToNewOwner;
     createShop(userId: string, data: any): Promise<any>;
     getShopById(shopId: string): Promise<any>;
     getUserShops(userId: string): Promise<any[]>;

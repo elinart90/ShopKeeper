@@ -49,7 +49,7 @@ export declare class SubscriptionsService {
     private getPlanAndCycleByAmountMinor;
     private readSubscriptionRow;
     private buildStatusFromRow;
-    getStatus(userId: string, shopId?: string): Promise<SubscriptionStatusResult>;
+    getStatus(userId: string): Promise<SubscriptionStatusResult>;
     initialize(userId: string, email: string, planCode: string, billingCycle?: BillingCycle): Promise<{
         authorization_url: string;
         reference: string;

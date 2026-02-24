@@ -1,4 +1,11 @@
+interface LoginAttemptMeta {
+    ipAddress?: string | null;
+    userAgent?: string | null;
+    deviceFingerprint?: string | null;
+}
 export declare class AuthService {
+    private createSession;
+    private writeLoginHistory;
     register(name: string, email: string, password: string): Promise<{
         user: {
             id: string;
@@ -8,7 +15,7 @@ export declare class AuthService {
         };
         token: string;
     }>;
-    login(email: string, password: string): Promise<{
+    login(email: string, password: string, meta?: LoginAttemptMeta): Promise<{
         user: {
             id: string;
             name: string;
@@ -16,6 +23,7 @@ export declare class AuthService {
             role: string;
         };
         token: string;
+        sessionId: string | undefined;
     }>;
     /**
      * Create a user account for staff (used when owner adds staff by email/name/password).
@@ -31,6 +39,13 @@ export declare class AuthService {
         name: any;
         email: any;
         role: any;
+    }>;
+    getPlatformAdminStatus(userId: string): Promise<{
+        isPlatformAdmin: false;
+        role?: undefined;
+    } | {
+        isPlatformAdmin: true;
+        role: string;
     }>;
     updateProfile(userId: string, data: {
         name?: string;
@@ -67,4 +82,5 @@ export declare class AuthService {
         success: boolean;
     }>;
 }
+export {};
 //# sourceMappingURL=auth.service.d.ts.map

@@ -146,7 +146,7 @@ export declare class ReportsService {
             expenses: number;
             profit: number;
         }[] | undefined;
-        type: "monthly" | "pl" | "daily" | "weekly" | "tax";
+        type: "pl" | "monthly" | "daily" | "weekly" | "tax";
         periodLabel: string;
         startDate: string;
         endDate: string;

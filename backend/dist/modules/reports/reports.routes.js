@@ -14,7 +14,7 @@ router.use(requireShop_1.requireShop);
 router.get('/dashboard', (req, res, next) => controller.getDashboardStats(req, res, next));
 router.get('/sales-intelligence', (req, res, next) => controller.getSalesIntelligence(req, res, next));
 router.get('/inventory-finance', requireOwner_1.requireOwner, (req, res, next) => controller.getInventoryFinance(req, res, next));
-router.get('/expenses-profit', (req, res, next) => controller.getExpensesProfit(req, res, next));
+router.get('/expenses-profit', requireOwner_1.requireOwner, (req, res, next) => controller.getExpensesProfit(req, res, next));
 router.get('/compliance-export', requireOwner_1.requireOwner, (req, res, next) => controller.getComplianceExport(req, res, next));
 router.get('/business-intelligence', requireOwner_1.requireOwner, (req, res, next) => controller.getBusinessIntelligence(req, res, next));
 router.post('/business-intelligence/query', requireOwner_1.requireOwner, (req, res, next) => controller.queryBusinessIntelligence(req, res, next));
