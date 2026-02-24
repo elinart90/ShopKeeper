@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, ShoppingCart, CheckCircle2 } from 'lucide-react';
+import { ArrowLeft, ShoppingCart, CheckCircle2, Printer } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { salesApi } from '../../../lib/api';
@@ -14,6 +14,7 @@ import {
   triggerBlobDownload,
   trySharePdfFile,
 } from '../utils/receiptShare';
+import { isBluetoothPrintSupported, printReceipt } from '../utils/bluetoothReceiptPrint';
 
 export default function SaleDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -22,6 +23,7 @@ export default function SaleDetailPage() {
   const navigate = useNavigate();
   const [sale, setSale] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [printing, setPrinting] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -103,6 +105,33 @@ export default function SaleDetailPage() {
     }
   };
 
+  const handlePrintReceipt = async () => {
+    if (!sale || !currentShop) return;
+    if (!isBluetoothPrintSupported()) {
+      toast.error('Bluetooth printing is not supported in this browser. Use Send PDF receipt instead.');
+      return;
+    }
+    setPrinting(true);
+    try {
+      const result = await printReceipt({
+        sale,
+        shopName: currentShop.name || 'ShopKeeper',
+        shopAddress: currentShop.address,
+        shopPhone: currentShop.phone,
+        shopEmail: currentShop.email,
+        cashierName: user?.name || user?.email || 'Cashier',
+        currency,
+      });
+      if (result.ok) toast.success('Receipt sent to printer.');
+      else toast.error(result.error || 'Print failed.');
+    } catch (e) {
+      console.error(e);
+      toast.error('Print failed.');
+    } finally {
+      setPrinting(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-4">
       <div className="max-w-lg mx-auto">
@@ -179,13 +208,27 @@ export default function SaleDetailPage() {
             </>
           )}
 
-          <div className="flex gap-3">
+          <div className="flex flex-wrap gap-3">
             <button
               onClick={shareReceipt}
-              className="flex-1 py-3 rounded-lg border border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/20"
+              className="flex-1 min-w-[120px] py-3 rounded-lg border border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/20"
             >
               Send PDF receipt
             </button>
+            {isBluetoothPrintSupported() && (
+              <button
+                onClick={handlePrintReceipt}
+                disabled={printing}
+                className="flex-1 min-w-[120px] py-3 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 inline-flex items-center justify-center gap-2"
+              >
+                {printing ? (
+                  <span className="h-4 w-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <Printer className="h-5 w-5" />
+                )}
+                Print receipt
+              </button>
+            )}
             <button
               onClick={() => navigate('/sales/new')}
               className="flex-1 py-3 rounded-lg btn-primary-gradient flex items-center justify-center gap-2"
