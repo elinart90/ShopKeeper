@@ -18,6 +18,7 @@ import paymentsRoutes from './modules/payments/payments.routes';
 import subscriptionsRoutes from './modules/subscriptions/subscriptions.routes';
 import controlsRoutes from './modules/controls/controls.routes';
 import adminRoutes from './modules/admin/admin.routes';
+import publicRoutes from './modules/public/public.routes';
 import { paystackWebhook } from './modules/payments/webhook.paystack';
 import { apiAccessLogger } from './middleware/apiAccessLogger';
 
@@ -71,6 +72,7 @@ app.use('/api/payments', paymentsRoutes);
 app.use('/api/subscriptions', subscriptionsRoutes);
 app.use('/api/controls', controlsRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/public', publicRoutes);
 
 // Error handling
 app.use(errorHandler);

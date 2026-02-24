@@ -6,6 +6,7 @@ import Header from "../layouts/HeaderForSigninSignup";
 import SignInPage from "../../features/auth/pages/SignInPage";
 import SignUpPage from "../../features/auth/pages/SignUpPage";
 import ForgotPasswordPage from "../../features/auth/pages/ForgotPasswordPage";
+import VerifyReceiptPage from "../../features/public/pages/VerifyReceiptPage";
 import Dashboard from "../../features/dashboard/pages/Home";
 import DashboardEditPage from "../../features/dashboard/pages/DashboardEditPage";
 import CreateShopPage from "../../features/shops/pages/CreateShopPage";
@@ -160,6 +161,7 @@ export default function AppRoutes() {
         <Route path="/sign-in" element={user ? <Navigate to="/dashboard" replace /> : <SignInPage />} />
         <Route path="/sign-up" element={user ? <Navigate to="/dashboard" replace /> : <SignUpPage />} />
         <Route path="/forgot-password" element={user ? <Navigate to="/dashboard" replace /> : <ForgotPasswordPage />} />
+        <Route path="/verify/:receiptRef" element={<VerifyReceiptPage />} />
         <Route
           path="/subscription"
           element={

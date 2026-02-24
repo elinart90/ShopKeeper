@@ -265,6 +265,21 @@ export default function Welcome() {
                 </button>
               </div>
             )}
+
+            {/* Public app access QR */}
+            {step === 0 && (
+              <div className="mt-3 flex items-center justify-center gap-3 rounded-lg border border-gray-200 bg-white/80 p-2 dark:border-gray-700 dark:bg-gray-800/80">
+                <img
+                  src="/app-access-qr.png"
+                  alt="Scan to open ShopKeeper app"
+                  className="h-14 w-14 rounded border border-gray-200 bg-white p-1 dark:border-gray-700"
+                />
+                <div className="text-left">
+                  <p className="text-[11px] font-medium text-gray-900 dark:text-gray-100">Scan to open ShopKeeper</p>
+                  <p className="text-[10px] text-gray-500 dark:text-gray-400">Use this QR on any phone camera</p>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>

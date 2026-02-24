@@ -2114,7 +2114,7 @@ function StaffTab({
     setTransferring(true);
     try {
       await shopsApi.transferOwnership({ newOwnerUserId });
-      toast.success("Ownership transferred. Refreshing...");
+      toast.success("Ownership transferred. Subscription entitlement moved to the new owner. Refreshing...");
       clearShopId();
       await refreshShops();
     } catch (e: any) {

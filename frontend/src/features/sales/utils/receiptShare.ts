@@ -217,10 +217,11 @@ export async function createReceiptPdfFile(args: {
   const items = Array.isArray(sale?.items) ? sale.items : [];
   const saleNumberRaw = String(sale?.sale_number || `SALE-${Date.now()}`);
   const saleNumberShort = toShortReceiptNumber(saleNumberRaw);
+  const receiptRef = String((sale as any)?.id || saleNumberShort).trim();
   const saleIsoDate = saleDate.toLocaleString();
   const verifyUrl = `${
     verifyBaseUrl || (typeof window !== 'undefined' ? window.location.origin : 'https://shopkeeper.app')
-  }/verify/${encodeURIComponent(saleNumberShort)}`;
+  }/verify/${encodeURIComponent(receiptRef)}`;
   const subtotal = Number(sale?.total_amount ?? items.reduce((sum, item) => sum + Number(item?.total_price || 0), 0));
   const discount = Number(sale?.discount_amount || 0);
   const tax = Number(sale?.tax_amount || 0);

@@ -22,6 +22,7 @@ const payments_routes_1 = __importDefault(require("./modules/payments/payments.r
 const subscriptions_routes_1 = __importDefault(require("./modules/subscriptions/subscriptions.routes"));
 const controls_routes_1 = __importDefault(require("./modules/controls/controls.routes"));
 const admin_routes_1 = __importDefault(require("./modules/admin/admin.routes"));
+const public_routes_1 = __importDefault(require("./modules/public/public.routes"));
 const webhook_paystack_1 = require("./modules/payments/webhook.paystack");
 const apiAccessLogger_1 = require("./middleware/apiAccessLogger");
 const app = (0, express_1.default)();
@@ -71,6 +72,7 @@ app.use('/api/payments', payments_routes_1.default);
 app.use('/api/subscriptions', subscriptions_routes_1.default);
 app.use('/api/controls', controls_routes_1.default);
 app.use('/api/admin', admin_routes_1.default);
+app.use('/api/public', public_routes_1.default);
 // Error handling
 app.use(errorHandler_1.errorHandler);
 exports.default = app;
