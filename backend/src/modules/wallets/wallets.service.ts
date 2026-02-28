@@ -29,7 +29,9 @@ export class WalletsService {
   }
 
   async getWallets(shopId: string) {
-    await this.ensureWallets(shopId, 'USD');
+    const { data: shopData } = await supabase.from('shops').select('currency').eq('id', shopId).maybeSingle();
+    const shopCurrency = String((shopData as any)?.currency || 'GHS').trim().toUpperCase() || 'GHS';
+    await this.ensureWallets(shopId, shopCurrency);
     const { data, error } = await supabase
       .from('wallets')
       .select('*')
@@ -62,12 +64,13 @@ export class WalletsService {
 
   async adjustBalance(shopId: string, userId: string, body: any) {
     const v = walletAdjustmentSchema.parse(body);
-    const { data: wallet } = await supabase
+    const { data: wallet, error: walletErr } = await supabase
       .from('wallets')
       .select('*')
       .eq('id', v.wallet_id)
       .eq('shop_id', shopId)
-      .single();
+      .maybeSingle();
+    if (walletErr) throw new Error('Failed to fetch wallet');
     if (!wallet) throw new Error('Wallet not found');
     const amount = v.type === 'inflow' ? Math.abs(v.amount) : -Math.abs(v.amount);
     const newBalance = Number(wallet.balance) + amount;
@@ -97,18 +100,20 @@ export class WalletsService {
 
   async transfer(shopId: string, userId: string, body: any) {
     const v = walletTransferSchema.parse(body);
-    const { data: from } = await supabase
+    const { data: from, error: fromFetchErr } = await supabase
       .from('wallets')
       .select('*')
       .eq('id', v.from_wallet_id)
       .eq('shop_id', shopId)
-      .single();
-    const { data: to } = await supabase
+      .maybeSingle();
+    if (fromFetchErr) throw new Error('Failed to fetch source wallet');
+    const { data: to, error: toFetchErr } = await supabase
       .from('wallets')
       .select('*')
       .eq('id', v.to_wallet_id)
       .eq('shop_id', shopId)
-      .single();
+      .maybeSingle();
+    if (toFetchErr) throw new Error('Failed to fetch destination wallet');
     if (!from || !to) throw new Error('Wallet not found');
     if (Number(from.balance) < v.amount) throw new Error('Insufficient balance');
     const txDesc = v.description || `Transfer to ${to.name}`;
@@ -132,16 +137,18 @@ export class WalletsService {
       created_by: userId,
     });
     if (txInErr) throw new Error('Failed to record transfer');
-    await supabase
+    const { error: fromErr } = await supabase
       .from('wallets')
       .update({ balance: Number(from.balance) - v.amount, updated_at: new Date().toISOString() })
       .eq('id', v.from_wallet_id);
-    const { data: toUpdated } = await supabase
+    if (fromErr) throw new Error('Failed to debit source wallet');
+    const { data: toUpdated, error: toErr } = await supabase
       .from('wallets')
       .update({ balance: Number(to.balance) + v.amount, updated_at: new Date().toISOString() })
       .eq('id', v.to_wallet_id)
       .select()
       .single();
+    if (toErr) throw new Error('Failed to credit destination wallet');
     return toUpdated;
   }
 }

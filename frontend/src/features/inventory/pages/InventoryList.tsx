@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Plus, Search, Package, AlertTriangle, Edit, Trash2 } from 'lucide-react';
+import { Plus, Search, Package, AlertTriangle, Edit, Trash2, CalendarRange } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { inventoryApi } from '../../../lib/api';
 import { useShop } from '../../../contexts/useShop';
@@ -18,6 +18,8 @@ interface Product {
   min_stock_level: number;
   unit: string;
   is_active: boolean;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export default function InventoryList() {
@@ -30,6 +32,36 @@ export default function InventoryList() {
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<'all' | 'low_stock' | 'out_of_stock' | 'deleted'>('all');
   const [usingCache, setUsingCache] = useState(false);
+
+  const today = new Date().toISOString().slice(0, 10);
+  const [rangeFrom, setRangeFrom] = useState(today);
+  const [rangeTo, setRangeTo] = useState(today);
+  const [movements, setMovements] = useState<any[]>([]);
+  const [movementsLoading, setMovementsLoading] = useState(false);
+
+  const totalQtyAdded = useMemo(
+    () => movements.filter((m) => m.action === 'purchase' || Number(m.quantity) > 0)
+                   .reduce((s, m) => s + Number(m.quantity || 0), 0),
+    [movements]
+  );
+
+  const loadMovements = async (from: string, to: string) => {
+    if (!currentShop) return;
+    setMovementsLoading(true);
+    try {
+      const res = await inventoryApi.getStockMovements({ from, to });
+      setMovements((res.data as any)?.data || []);
+    } catch {
+      setMovements([]);
+    } finally {
+      setMovementsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadMovements(rangeFrom, rangeTo);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rangeFrom, rangeTo, currentShop]);
 
   useEffect(() => {
     if (currentShop) {
@@ -280,6 +312,9 @@ export default function InventoryList() {
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                       Price
                     </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                      Date Added
+                    </th>
                     <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                       Actions
                     </th>
@@ -348,8 +383,22 @@ export default function InventoryList() {
                           Cost: {currentShop.currency} {product.cost_price.toFixed(2)}
                         </div>
                       </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        {product.created_at ? (
+                          <div className="text-sm text-gray-700 dark:text-gray-300">
+                            {new Date(product.created_at).toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' })}
+                          </div>
+                        ) : (
+                          <div className="text-sm text-gray-400 dark:text-gray-500">—</div>
+                        )}
+                        {product.updated_at && product.updated_at !== product.created_at && (
+                          <div className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+                            Updated: {new Date(product.updated_at).toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' })}
+                          </div>
+                        )}
+                      </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                        <div className="flex items-center justify-end gap-2">
+                        <div className="flex items-center justify-end gap-4">
                           {filter === 'deleted' ? (
                             <button
                               onClick={() => handleRestore(product.id)}
@@ -382,6 +431,139 @@ export default function InventoryList() {
             </div>
           </div>
         )}
+
+        {/* Stock Movement History */}
+        <div className="mt-8 bg-white dark:bg-gray-800 rounded-xl shadow border border-gray-200 dark:border-gray-700 p-6">
+          <div className="flex items-center gap-2 mb-1">
+            <CalendarRange className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+            <h2 className="text-base font-semibold text-gray-900 dark:text-white">
+              Stock movement history
+            </h2>
+          </div>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mb-5">
+            Shows each stock-in event: the quantity that was left before, how much was added, and the new total after.
+          </p>
+
+          {/* Date pickers */}
+          <div className="flex flex-wrap items-end gap-4 mb-6">
+            <div>
+              <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">From</label>
+              <input
+                type="date"
+                value={rangeFrom}
+                max={rangeTo}
+                onChange={(e) => setRangeFrom(e.target.value)}
+                className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">To</label>
+              <input
+                type="date"
+                value={rangeTo}
+                min={rangeFrom}
+                onChange={(e) => setRangeTo(e.target.value)}
+                className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+              />
+            </div>
+            <button
+              onClick={() => { setRangeFrom(today); setRangeTo(today); }}
+              className="px-3 py-2 text-xs rounded-lg border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700"
+            >
+              Today
+            </button>
+          </div>
+
+          {movementsLoading ? (
+            <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400 py-4">
+              <span className="h-4 w-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+              Loading movements…
+            </div>
+          ) : movements.length === 0 ? (
+            <p className="text-sm text-gray-500 dark:text-gray-400 italic">
+              No stock movements recorded between {new Date(rangeFrom + 'T00:00:00').toLocaleDateString()} and {new Date(rangeTo + 'T00:00:00').toLocaleDateString()}.
+            </p>
+          ) : (
+            <>
+              {/* Summary cards */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+                <div className="rounded-lg bg-gray-50 dark:bg-gray-900/40 border border-gray-200 dark:border-gray-600 p-4">
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Stock events</p>
+                  <p className="text-2xl font-bold text-gray-900 dark:text-white">{movements.length}</p>
+                </div>
+                <div className="rounded-lg bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 p-4">
+                  <p className="text-xs text-emerald-600 dark:text-emerald-400 mb-1">Total units added</p>
+                  <p className="text-2xl font-bold text-emerald-700 dark:text-emerald-300">{totalQtyAdded}</p>
+                </div>
+              </div>
+
+              {/* Movement breakdown table */}
+              <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 dark:bg-gray-700">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">#</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Product name</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Date</th>
+                      <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Item left before</th>
+                      <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Qty added</th>
+                      <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Total qty</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Type</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                    {movements.map((m, idx) => {
+                      const qtyAdded = Number(m.quantity || 0);
+                      const prevQty  = Number(m.previous_quantity ?? 0);
+                      const newQty   = Number(m.new_quantity ?? 0);
+                      const isInflow = qtyAdded > 0;
+                      return (
+                        <tr key={m.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                          <td className="px-4 py-3 text-gray-400 dark:text-gray-500">{idx + 1}</td>
+                          <td className="px-4 py-3 font-medium text-gray-900 dark:text-white">
+                            {m.product?.name ?? '—'}
+                          </td>
+                          <td className="px-4 py-3 text-gray-600 dark:text-gray-400 whitespace-nowrap">
+                            {new Date(m.created_at).toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' })}
+                          </td>
+                          <td className="px-4 py-3 text-right text-gray-700 dark:text-gray-300">
+                            {prevQty} {m.product?.unit ?? ''}
+                          </td>
+                          <td className={`px-4 py-3 text-right font-semibold ${isInflow ? 'text-emerald-700 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+                            {isInflow ? '+' : ''}{qtyAdded} {m.product?.unit ?? ''}
+                          </td>
+                          <td className="px-4 py-3 text-right font-bold text-gray-900 dark:text-white">
+                            {newQty} {m.product?.unit ?? ''}
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium capitalize ${
+                              m.action === 'purchase' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
+                              : m.action === 'sale'   ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300'
+                              : 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300'
+                            }`}>
+                              {m.action}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                  <tfoot className="bg-gray-50 dark:bg-gray-700 font-semibold">
+                    <tr>
+                      <td colSpan={4} className="px-4 py-3 text-right text-xs text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                        Total added
+                      </td>
+                      <td className="px-4 py-3 text-right text-emerald-700 dark:text-emerald-300">
+                        +{totalQtyAdded}
+                      </td>
+                      <td colSpan={2} />
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </>
+          )}
+        </div>
       </div>
     </div>
   );

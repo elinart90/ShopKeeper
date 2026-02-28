@@ -1,7 +1,7 @@
 export class Money {
   constructor(
     public amount: number,
-    public currency: string = 'USD'
+    public currency: string = 'GHS'
   ) {}
 
   add(other: Money): Money {

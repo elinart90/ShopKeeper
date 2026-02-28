@@ -284,7 +284,7 @@ export default function CreditTab({ onNavigate }: { onNavigate: (path: string) =
                 </div>
                 <div className="rounded-lg border border-gray-200 dark:border-gray-600 p-3 bg-gray-50 dark:bg-gray-900/40">
                   <p className="text-xs text-gray-500 dark:text-gray-400">Collection rate ({intel.lookbackDays}d)</p>
-                  <p className="text-xl font-bold text-emerald-600 dark:text-emerald-400">{intel.collectionRateRecent.toFixed(1)}%</p>
+                  <p className="text-xl font-bold text-emerald-600 dark:text-emerald-400">{Number.isFinite(intel.collectionRateRecent) ? intel.collectionRateRecent.toFixed(1) : '0.0'}%</p>
                 </div>
               </div>
 

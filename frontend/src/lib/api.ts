@@ -171,6 +171,8 @@ export const inventoryApi = {
   getLowStock: () => api.get('/inventory/products/low-stock'),
   getCategories: () => api.get('/inventory/categories'),
   createCategory: (data: any) => api.post('/inventory/categories', data),
+  getStockMovements: (params?: { from?: string; to?: string }) =>
+    api.get('/inventory/stock-movements', { params }),
 };
 
 export const salesApi = {

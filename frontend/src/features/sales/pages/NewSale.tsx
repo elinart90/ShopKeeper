@@ -32,7 +32,7 @@ import {
   triggerBlobDownload,
   trySharePdfFile,
 } from '../utils/receiptShare';
-import { isBluetoothPrintSupported, printReceipt } from '../utils/bluetoothReceiptPrint';
+import { printReceipt } from '../utils/windowPrint';
 
 const PENDING_PAYSTACK_SALE_KEY = 'shoopkeeper_pending_paystack_sale';
 
@@ -123,7 +123,6 @@ export default function NewSale() {
   const [receiptPromptSale, setReceiptPromptSale] = useState<any | null>(null);
   const [receiptPhoneInput, setReceiptPhoneInput] = useState('');
   const [receiptPrinting, setReceiptPrinting] = useState(false);
-  const [rememberPrinter, setRememberPrinter] = useState(true);
 
   useEffect(() => {
     if (searchQuery) {
@@ -557,7 +556,15 @@ export default function NewSale() {
       return;
     }
 
-    const { total } = calculateTotals();
+    const { subtotal, total } = calculateTotals();
+    if (discount > subtotal) {
+      toast.error('Discount cannot exceed the subtotal');
+      return;
+    }
+    if (total < 0) {
+      toast.error('Total cannot be negative');
+      return;
+    }
     if (paymentMethod === 'credit' && !creditCustomerId) {
       toast.error('Select or add a customer for credit sales. They will appear in Dashboard → Credit & Risk.');
       return;
@@ -664,34 +671,23 @@ export default function NewSale() {
     if (saleId) navigate(`/sales/${saleId}`);
   };
 
-  const handlePrintReceipt = async () => {
+  const handlePrintReceipt = () => {
     if (!receiptPromptSale || !currentShop) return;
-    if (!isBluetoothPrintSupported()) {
-      toast.error('Bluetooth printing is not supported in this browser. Use Send PDF receipt instead.');
-      return;
-    }
     setReceiptPrinting(true);
     try {
-      const result = await printReceipt(
-        {
-          sale: receiptPromptSale,
-          shopName: currentShop.name || 'ShopKeeper',
-          shopAddress: currentShop.address,
-          shopPhone: currentShop.phone,
-          shopEmail: currentShop.email,
-          cashierName: user?.name || user?.email || 'Cashier',
-          currency: currentShop.currency || 'GHS',
-        },
-        { rememberPrinter }
-      );
-      if (result.ok) {
-        toast.success('Receipt sent to printer.');
-      } else {
-        toast.error(result.error || 'Print failed.');
-      }
+      printReceipt({
+        sale: receiptPromptSale,
+        shopName: currentShop.name || 'ShopKeeper',
+        shopAddress: currentShop.address,
+        shopPhone: currentShop.phone,
+        shopEmail: currentShop.email,
+        cashierName: user?.name || user?.email || 'Cashier',
+        currency: currentShop.currency || 'GHS',
+      });
+      toast.success('Print dialog opened.');
     } catch (e) {
       console.error(e);
-      toast.error('Print failed.');
+      toast.error('Could not open print dialog.');
     } finally {
       setReceiptPrinting(false);
     }
@@ -1256,17 +1252,6 @@ export default function NewSale() {
                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
               />
             </div>
-            {isBluetoothPrintSupported() && (
-              <label className="mt-3 flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={rememberPrinter}
-                  onChange={(e) => setRememberPrinter(e.target.checked)}
-                  className="rounded border-gray-300 dark:border-gray-600"
-                />
-                Remember this printer
-              </label>
-            )}
             <div className="mt-4 flex flex-wrap gap-2">
               <button
                 type="button"
@@ -1275,21 +1260,15 @@ export default function NewSale() {
               >
                 Skip
               </button>
-              {isBluetoothPrintSupported() && (
-                <button
-                  type="button"
-                  onClick={handlePrintReceipt}
-                  disabled={receiptPrinting}
-                  className="flex-1 min-w-[80px] py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 inline-flex items-center justify-center gap-1.5"
-                >
-                  {receiptPrinting ? (
-                    <span className="h-4 w-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                  ) : (
-                    <Printer className="h-4 w-4" />
-                  )}
-                  Print
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={handlePrintReceipt}
+                disabled={receiptPrinting}
+                className="flex-1 min-w-[80px] py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 inline-flex items-center justify-center gap-1.5"
+              >
+                <Printer className="h-4 w-4" />
+                Print
+              </button>
               <button
                 type="button"
                 onClick={handleSendReceipt}

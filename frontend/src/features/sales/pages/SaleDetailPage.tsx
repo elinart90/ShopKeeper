@@ -14,7 +14,7 @@ import {
   triggerBlobDownload,
   trySharePdfFile,
 } from '../utils/receiptShare';
-import { isBluetoothPrintSupported, printReceipt } from '../utils/bluetoothReceiptPrint';
+import { printReceipt } from '../utils/windowPrint';
 
 export default function SaleDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -23,7 +23,6 @@ export default function SaleDetailPage() {
   const navigate = useNavigate();
   const [sale, setSale] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [printing, setPrinting] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -105,15 +104,10 @@ export default function SaleDetailPage() {
     }
   };
 
-  const handlePrintReceipt = async () => {
+  const handlePrintReceipt = () => {
     if (!sale || !currentShop) return;
-    if (!isBluetoothPrintSupported()) {
-      toast.error('Bluetooth printing is not supported in this browser. Use Send PDF receipt instead.');
-      return;
-    }
-    setPrinting(true);
     try {
-      const result = await printReceipt({
+      printReceipt({
         sale,
         shopName: currentShop.name || 'ShopKeeper',
         shopAddress: currentShop.address,
@@ -122,13 +116,10 @@ export default function SaleDetailPage() {
         cashierName: user?.name || user?.email || 'Cashier',
         currency,
       });
-      if (result.ok) toast.success('Receipt sent to printer.');
-      else toast.error(result.error || 'Print failed.');
+      toast.success('Print dialog opened.');
     } catch (e) {
       console.error(e);
-      toast.error('Print failed.');
-    } finally {
-      setPrinting(false);
+      toast.error('Could not open print dialog.');
     }
   };
 
@@ -215,20 +206,13 @@ export default function SaleDetailPage() {
             >
               Send PDF receipt
             </button>
-            {isBluetoothPrintSupported() && (
-              <button
-                onClick={handlePrintReceipt}
-                disabled={printing}
-                className="flex-1 min-w-[120px] py-3 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 inline-flex items-center justify-center gap-2"
-              >
-                {printing ? (
-                  <span className="h-4 w-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                ) : (
-                  <Printer className="h-5 w-5" />
-                )}
-                Print receipt
-              </button>
-            )}
+            <button
+              onClick={handlePrintReceipt}
+              className="flex-1 min-w-[120px] py-3 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 inline-flex items-center justify-center gap-2"
+            >
+              <Printer className="h-5 w-5" />
+              Print receipt
+            </button>
             <button
               onClick={() => navigate('/sales/new')}
               className="flex-1 py-3 rounded-lg btn-primary-gradient flex items-center justify-center gap-2"

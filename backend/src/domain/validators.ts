@@ -6,7 +6,7 @@ export const shopSchema = z.object({
   address: z.string().optional(),
   phone: z.string().optional(),
   email: z.string().email().optional(),
-  currency: z.string().default('USD'),
+  currency: z.string().default('GHS'),
   timezone: z.string().default('UTC'),
 });
 

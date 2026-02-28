@@ -682,6 +682,22 @@ Important rules:
     return data || [];
   }
 
+  async getShopStockMovements(shopId: string, from?: string, to?: string) {
+    let query = supabase
+      .from('stock_movements')
+      .select('*, product:products(id,name,unit)')
+      .eq('shop_id', shopId)
+      .order('created_at', { ascending: false })
+      .limit(500);
+
+    if (from) query = query.gte('created_at', new Date(from + 'T00:00:00').toISOString());
+    if (to)   query = query.lte('created_at', new Date(to   + 'T23:59:59').toISOString());
+
+    const { data, error } = await query;
+    if (error) throw new Error('Failed to fetch stock movements');
+    return data || [];
+  }
+
   async createCategory(shopId: string, data: { name: string; description?: string; parent_id?: string }) {
     const { data: category, error } = await supabase
       .from('categories')

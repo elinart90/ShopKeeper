@@ -226,6 +226,18 @@ export class InventoryController {
     }
   }
 
+  async getShopStockMovements(req: ShopRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.shopId) throw new AppError('Shop ID is required', 400);
+      const from = (req.query.from as string) || undefined;
+      const to   = (req.query.to   as string) || undefined;
+      const data = await inventoryService.getShopStockMovements(req.shopId, from, to);
+      res.json({ success: true, data });
+    } catch (error) {
+      errorHandler(error as AppError, req, res, next);
+    }
+  }
+
   // Categories
   async createCategory(req: ShopRequest, res: Response, next: NextFunction) {
     try {

@@ -26,6 +26,7 @@ router.post('/products/:id/receive-stock', requirePermission('inventory.receive_
 router.delete('/products/:id', requirePermission('inventory.delete'), (req, res, next) => controller.deleteProduct(req, res, next));
 router.post('/products/:id/restore', requirePermission('inventory.update'), (req, res, next) => controller.restoreProduct(req, res, next));
 router.get('/products/:id/history', (req, res, next) => controller.getStockHistory(req, res, next));
+router.get('/stock-movements', (req, res, next) => controller.getShopStockMovements(req, res, next));
 
 // Categories
 router.post('/categories', requireOwner, (req, res, next) => controller.createCategory(req, res, next));
