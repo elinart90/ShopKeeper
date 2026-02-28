@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Receipt printing via window.print() — optimised for 58mm thermal paper.
  * Uses @page CSS to set 58mm paper size, 2-column item rows, and left-aligned layout.
  */
@@ -167,12 +167,35 @@ function buildReceiptHtml(p: ReceiptPrintPayload): string {
   return parts.join("");
 }
 
+/** Returns true when running on Android or iOS. */
+function isMobileDevice(): boolean {
+  if (typeof navigator === "undefined") return false;
+  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+    navigator.userAgent
+  );
+}
+
 /**
- * Opens a popup window with a styled 58mm receipt and calls window.print().
+ * Mobile path: build the receipt as a Blob URL and open it in a new tab.
+ * The user can then tap the browser's Share / Print button from there.
+ */
+function printReceiptMobile(html: string): void {
+  const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const opened = window.open(url, "_blank");
+  // If popup was blocked, fall back to navigating in the same tab
+  if (!opened) {
+    window.location.href = url;
+  }
+  // Revoke the object URL after enough time for the page to load
+  setTimeout(() => URL.revokeObjectURL(url), 120_000);
+}
+
+/**
+ * Desktop path: open a popup with a styled 58mm receipt and call window.print().
  * Falls back to a hidden iframe if popups are blocked.
  */
-export function printReceipt(payload: ReceiptPrintPayload): void {
-  const html = buildReceiptHtml(payload);
+function printReceiptDesktop(html: string): void {
   const win = window.open("", "_blank", "width=300,height=600");
   if (!win) {
     const iframe = document.createElement("iframe");
@@ -200,4 +223,19 @@ export function printReceipt(payload: ReceiptPrintPayload): void {
     win.print();
     win.close();
   }, 300);
+}
+
+/**
+ * Prints a receipt.
+ * • Desktop/PC  → opens a popup and calls window.print() (works with thermal printers).
+ * • Android/iOS → opens the receipt as a HTML page in a new tab so the user can use
+ *                 the browser's built-in Share / Print menu.
+ */
+export function printReceipt(payload: ReceiptPrintPayload): void {
+  const html = buildReceiptHtml(payload);
+  if (isMobileDevice()) {
+    printReceiptMobile(html);
+  } else {
+    printReceiptDesktop(html);
+  }
 }
