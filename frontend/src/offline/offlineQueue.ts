@@ -1,5 +1,6 @@
 import { api } from "../lib/api";
 import { emitQueueChanged, makeOpId, offlineDb, type SyncQueueItem } from "./db";
+import { addNotification } from "./notificationsCache";
 
 let processingInFlight: Promise<{ processed: number }> | null = null;
 
@@ -32,6 +33,17 @@ export async function enqueueOperation(input: Omit<SyncQueueItem, "id" | "opId" 
 
   await offlineDb.syncQueue.add(op);
   emitQueueChanged();
+
+  // Register a Background Sync tag so the SW can flush the queue even after
+  // the tab is closed and the device comes back online.
+  if (typeof navigator !== "undefined" && "serviceWorker" in navigator) {
+    navigator.serviceWorker.ready
+      .then((reg) => {
+        if ("sync" in reg) return (reg as any).sync.register("sk-sync-queue");
+      })
+      .catch(() => {}); // not fatal — in-app sync engine is the fallback
+  }
+
   return op;
 }
 
@@ -96,6 +108,18 @@ async function processQueueInternal() {
         updatedAt: new Date().toISOString(),
       });
       emitQueueChanged();
+
+      // After 3 failed retries (non-network), surface a notification to the user.
+      if (!isNetworkError(error) && retries >= 3 && item.shopId) {
+        addNotification({
+          notifId: `sync-error-${item.opId}`,
+          type: "sync_error",
+          title: "Background Sync Failed",
+          message: `Could not sync ${item.entity} ${item.action}. ${message.slice(0, 80)}`,
+          shopId: item.shopId,
+          meta: { opId: item.opId, entity: item.entity, action: item.action },
+        }).catch(() => {});
+      }
 
       if (isNetworkError(error)) {
         break;

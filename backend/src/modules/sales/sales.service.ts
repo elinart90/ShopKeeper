@@ -102,13 +102,15 @@ export class SalesService {
     }> = [];
 
     for (const item of validated.items) {
+      // Soft pre-check: fast early exit for obviously wrong requests.
+      // Not relied upon for correctness — the atomic RPC below is the real guard.
       const product = await inventoryService.getProductById(item.product_id);
       if (product.shop_id !== shopId) {
         throw new Error(`Product ${item.product_id} does not belong to this shop`);
       }
       if (Number(product.stock_quantity) < item.quantity) {
         throw new Error(
-          `Insufficient stock for product ${product.name}. Available: ${product.stock_quantity}`
+          `Insufficient stock for "${product.name}". Available: ${product.stock_quantity}, requested: ${item.quantity}`
         );
       }
       const itemTotal = item.unit_price * item.quantity - (item.discount_amount || 0);
@@ -163,15 +165,26 @@ export class SalesService {
     }
 
     for (const item of validated.items) {
-      const product = await inventoryService.getProductById(item.product_id);
-      const newQuantity = Number(product.stock_quantity) - item.quantity;
-      await supabase
-        .from('products')
-        .update({
-          stock_quantity: newQuantity,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', item.product_id);
+      // Atomic decrement via PostgreSQL row-level lock.
+      // If two cashiers sell the same product simultaneously, the second call
+      // blocks here (milliseconds) until the first commits, then re-reads the
+      // latest stock and returns an error if it's now insufficient.
+      const { data: decrementResult, error: decrementError } = await supabase
+        .rpc('decrement_stock_safe', {
+          p_product_id: item.product_id,
+          p_shop_id:    shopId,
+          p_quantity:   item.quantity,
+        });
+
+      if (decrementError || !decrementResult?.ok) {
+        // Roll back — delete the already-inserted sale and its items.
+        await supabase.from('sale_items').delete().eq('sale_id', sale.id);
+        await supabase.from('sales').delete().eq('id', sale.id);
+        throw new Error(
+          decrementResult?.error ||
+          `Stock update failed for product ${item.product_id}. Please try again.`
+        );
+      }
 
       await inventoryService.logStockMovement(
         shopId,
@@ -179,34 +192,27 @@ export class SalesService {
         userId,
         'sale',
         item.quantity,
-        Number(product.stock_quantity),
-        newQuantity,
+        Number(decrementResult.old_quantity),
+        Number(decrementResult.new_quantity),
         `Sale ${saleNumber}`
       );
     }
 
     if (validated.payment_method === 'credit' && validated.customer_id) {
-      const { data: customer } = await supabase
-        .from('customers')
-        .select('credit_balance')
-        .eq('id', validated.customer_id)
-        .single();
-      if (customer) {
-        await supabase
-          .from('customers')
-          .update({
-            credit_balance: Number(customer.credit_balance) + finalAmount,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', validated.customer_id);
-      }
+      // Use a conditional UPDATE expression so concurrent credit sales
+      // for the same customer don't overwrite each other.
+      await supabase.rpc('increment_credit_balance', {
+        p_customer_id: validated.customer_id,
+        p_shop_id:     shopId,
+        p_amount:      finalAmount,
+      });
     }
 
     return this.getSaleById(sale.id);
   }
 
-  async getSaleById(saleId: string) {
-    const { data: sale, error } = await supabase
+  async getSaleById(saleId: string, shopId?: string) {
+    let query = supabase
       .from('sales')
       .select(
         `
@@ -218,8 +224,12 @@ export class SalesService {
         )
       `
       )
-      .eq('id', saleId)
-      .single();
+      .eq('id', saleId);
+
+    // When called from the public API endpoint, enforce shop isolation.
+    if (shopId) query = query.eq('shop_id', shopId);
+
+    const { data: sale, error } = await query.single();
 
     if (error) {
       logger.error('Error fetching sale:', error);

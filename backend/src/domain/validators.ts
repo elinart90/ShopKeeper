@@ -60,6 +60,7 @@ export const customerSchema = z.object({
   phone: z.string().optional(),
   email: z.string().email().optional(),
   address: z.string().optional(),
+  location: z.string().optional(),
   credit_limit: z.number().min(0).default(0),
   notes: z.string().optional(),
 });

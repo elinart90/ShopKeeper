@@ -5,6 +5,8 @@ import { Link } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { inventoryApi } from '../../../lib/api';
 import { useShop } from '../../../contexts/useShop';
+import { enqueueOperation, processQueueOnce } from '../../../offline/offlineQueue';
+import { cacheProducts, getCachedProducts } from '../../../offline/inventoryCache';
 
 const UNITS = [
   { value: 'piece', label: 'Pcs' },
@@ -70,12 +72,32 @@ export default function EditProductPage() {
         });
         if (p.image_url) setPhotoPreview(p.image_url);
       })
-      .catch(() => {
+      .catch(async () => {
+        if (currentShop?.id) {
+          const cached = await getCachedProducts(currentShop.id, {});
+          const p = cached.find((c) => c.id === id);
+          if (p) {
+            setForm({
+              name: p.name || '',
+              barcode: p.barcode || '',
+              selling_price: String(p.selling_price ?? ''),
+              cost_price: String(p.cost_price ?? ''),
+              stock_quantity: String(p.stock_quantity ?? ''),
+              unit: p.unit || 'piece',
+              min_stock_level: String(p.min_stock_level ?? ''),
+              category_id: '',
+              sku: p.sku || '',
+              description: '',
+            });
+            toast('Offline – showing cached product. Changes will sync when you reconnect.');
+            return;
+          }
+        }
         toast.error('Failed to load product');
         navigate('/inventory');
       })
       .finally(() => setLoading(false));
-  }, [id, navigate]);
+  }, [id, navigate, currentShop]);
 
   const validate = (): boolean => {
     const e: Record<string, string> = {};
@@ -93,21 +115,49 @@ export default function EditProductPage() {
   const handleSave = async () => {
     if (!id || !validate()) return;
     setSaving(true);
+    const payload = {
+      name: form.name.trim(),
+      barcode: form.barcode.trim() || undefined,
+      selling_price: parseFloat(form.selling_price),
+      cost_price: form.cost_price ? parseFloat(form.cost_price) : 0,
+      stock_quantity: parseFloat(form.stock_quantity) || 0,
+      unit: form.unit,
+      min_stock_level: parseFloat(form.min_stock_level) || 0,
+      category_id: form.category_id || undefined,
+      sku: form.sku.trim() || undefined,
+      description: form.description.trim() || undefined,
+    };
     try {
-      await inventoryApi.updateProduct(id, {
-        name: form.name.trim(),
-        barcode: form.barcode.trim() || undefined,
-        selling_price: parseFloat(form.selling_price),
-        cost_price: form.cost_price ? parseFloat(form.cost_price) : 0,
-        stock_quantity: parseFloat(form.stock_quantity) || 0,
-        unit: form.unit,
-        min_stock_level: parseFloat(form.min_stock_level) || 0,
-        category_id: form.category_id || undefined,
-        sku: form.sku.trim() || undefined,
-        description: form.description.trim() || undefined,
+      // 1. Update local cache immediately (optimistic).
+      await cacheProducts(currentShop!.id, [{
+        id,
+        name: payload.name,
+        barcode: payload.barcode,
+        selling_price: Number(payload.selling_price || 0),
+        cost_price: Number(payload.cost_price || 0),
+        stock_quantity: Number(payload.stock_quantity || 0),
+        min_stock_level: Number(payload.min_stock_level || 0),
+        unit: payload.unit || 'piece',
+        is_active: true,
+      }]);
+
+      // 2. Enqueue the server write.
+      await enqueueOperation({
+        entity: 'inventory',
+        action: 'update',
+        method: 'patch',
+        url: `/inventory/products/${id}`,
+        payload,
+        shopId: currentShop!.id,
+        dedupeKey: `inventory:update:${id}`,
       });
+
+      // 3. Navigate immediately.
       toast.success('Product updated');
       navigate('/inventory');
+
+      // 4. Kick off background sync — flushes queue immediately if online.
+      processQueueOnce().catch(() => {});
     } catch (err: any) {
       const msg = err?.response?.data?.error?.message || err?.response?.data?.message || err?.message || 'Failed to update';
       toast.error(msg);

@@ -4,9 +4,7 @@ import { Plus, Search, Package, AlertTriangle, Edit, Trash2, CalendarRange } fro
 import toast from 'react-hot-toast';
 import { inventoryApi } from '../../../lib/api';
 import { useShop } from '../../../contexts/useShop';
-import { cacheProducts, getCachedProducts } from '../../../offline/inventoryCache';
-import { useOfflineStatus } from '../../../hooks/useOfflineStatus';
-
+import { replaceProductsCache, getCachedProducts } from '../../../offline/inventoryCache';
 interface Product {
   id: string;
   name: string;
@@ -26,7 +24,6 @@ export default function InventoryList() {
   const { currentShop } = useShop();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { online } = useOfflineStatus();
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -78,53 +75,46 @@ export default function InventoryList() {
 
   const loadProducts = async () => {
     if (!currentShop) return;
-
     setLoading(true);
+
+    // 1. Show cached data instantly — zero network wait.
+    const cached = await getCachedProducts(currentShop.id, {
+      search: searchQuery,
+      lowStock: filter === 'low_stock',
+      outOfStock: filter === 'out_of_stock',
+    });
+    if (cached.length > 0) {
+      setProducts(cached as Product[]);
+      setUsingCache(true);
+      setLoading(false);
+    }
+
+    // 2. Refresh from the server silently in the background.
     try {
       const params: any = {};
-      if (searchQuery) {
-        params.search = searchQuery;
-      }
-      if (filter === 'low_stock') {
-        params.low_stock = true;
-      }
-      if (filter === 'deleted') {
-        params.is_active = false;
-      } else {
-        params.is_active = true;
-      }
+      if (searchQuery) { params.search = searchQuery; }
+      if (filter === 'low_stock') { params.low_stock = true; }
+      if (filter === 'deleted') { params.is_active = false; }
+      else { params.is_active = true; }
 
       const response = await inventoryApi.getProducts(params);
       let productsData = response.data.data || [];
       if (filter !== 'deleted') {
         productsData = productsData.filter((p: Product) => p.is_active !== false);
       }
-
       if (filter === 'out_of_stock') {
         productsData = productsData.filter((p: Product) => p.stock_quantity === 0);
       }
-
       setProducts(productsData);
       setUsingCache(false);
-      await cacheProducts(currentShop.id, productsData);
+      // Replace (not merge) so temp offline-* product IDs are cleaned up after a real sync.
+      await replaceProductsCache(currentShop.id, productsData);
     } catch (error: any) {
-      const cached = await getCachedProducts(currentShop.id, {
-        search: searchQuery,
-        lowStock: filter === 'low_stock',
-        outOfStock: filter === 'out_of_stock',
-      });
-      if (cached.length > 0 || !online) {
-        setProducts(cached as Product[]);
-        setUsingCache(true);
-        if (!online) {
-          toast('Offline: showing cached inventory');
-        } else {
-          toast('Using cached inventory (sync pending)');
-        }
-      } else {
+      if (cached.length === 0) {
         toast.error('Failed to load products');
         console.error(error);
       }
+      // Already showing cached data — silent fail is intentional.
     } finally {
       setLoading(false);
     }

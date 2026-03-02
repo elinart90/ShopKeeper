@@ -12,6 +12,7 @@ const controller = new ShopsController();
 router.use(requireAuth);
 
 router.get('/my-shops', (req, res, next) => controller.getUserShops(req, res, next));
+router.get('/owner-summary', (req, res, next) => controller.getOwnerSummary(req, res, next));
 
 router.use(requireActiveSubscription);
 

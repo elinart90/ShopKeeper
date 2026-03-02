@@ -1,22 +1,23 @@
-type AdminStatusBadgeProps = {
-  status?: string | null;
+type AdminStatusBadgeProps = { status?: string | null };
+
+const BADGE_MAP: Record<string, { dot: string; text: string; bg: string }> = {
+  active:    { dot: 'bg-emerald-400', text: 'text-emerald-300', bg: 'rgba(16,185,129,0.12)' },
+  suspended: { dot: 'bg-red-400',     text: 'text-red-300',     bg: 'rgba(239,68,68,0.12)'  },
+  flagged:   { dot: 'bg-amber-400',   text: 'text-amber-300',   bg: 'rgba(245,158,11,0.12)' },
+  draft:     { dot: 'bg-gray-400',    text: 'text-gray-400',    bg: 'rgba(156,163,175,0.1)' },
+  completed: { dot: 'bg-emerald-400', text: 'text-emerald-300', bg: 'rgba(16,185,129,0.12)' },
+  cancelled: { dot: 'bg-red-400',     text: 'text-red-300',     bg: 'rgba(239,68,68,0.12)'  },
 };
 
 export default function AdminStatusBadge({ status }: AdminStatusBadgeProps) {
   const key = String(status || 'unknown').toLowerCase();
-  const ui =
-    key === 'active'
-      ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
-      : key === 'suspended'
-        ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300'
-        : key === 'flagged'
-          ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300'
-          : key === 'draft'
-            ? 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300'
-            : 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300';
-
+  const { dot, text, bg } = BADGE_MAP[key] ?? { dot: 'bg-blue-400', text: 'text-blue-300', bg: 'rgba(96,165,250,0.12)' };
   return (
-    <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${ui}`}>
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${text}`}
+      style={{ background: bg, border: `1px solid ${bg.replace('0.12', '0.2')}` }}
+    >
+      <span className={`h-1.5 w-1.5 rounded-full ${dot}`} />
       {status || 'unknown'}
     </span>
   );

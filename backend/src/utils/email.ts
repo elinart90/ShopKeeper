@@ -2,10 +2,10 @@ import nodemailer from 'nodemailer';
 import { env } from '../config/env';
 import { logger } from './logger';
 
-let transporter: nodemailer.Transporter | null = null;
-
-function getTransporter(): nodemailer.Transporter | null {
-  if (transporter) return transporter;
+// Do NOT cache the transporter globally — if it fails once (e.g. ETIMEDOUT)
+// the cached broken instance would silently drop every subsequent email.
+// Instead, create a fresh instance per call (cheap, stateless).
+function createTransporter(): nodemailer.Transporter | null {
   const { email } = env;
   const normalizedUser = String(email.user || '').trim();
   let normalizedPassword = String(email.password || '').trim();
@@ -18,7 +18,8 @@ function getTransporter(): nodemailer.Transporter | null {
     logger.warn('Email not configured (EMAIL_USER/EMAIL_PASSWORD missing). PIN emails will not be sent.');
     return null;
   }
-  transporter = nodemailer.createTransport({
+
+  return nodemailer.createTransport({
     host: String(email.host || '').trim(),
     port: Number(email.port || 587),
     secure: email.secure,
@@ -26,15 +27,19 @@ function getTransporter(): nodemailer.Transporter | null {
       user: normalizedUser,
       pass: normalizedPassword,
     },
+    // Prevent indefinite hangs — fail fast so the server isn't blocked.
+    connectionTimeout: 10_000,  // 10 s to establish TCP
+    greetingTimeout:   8_000,   // 8 s to receive SMTP greeting
+    socketTimeout:     15_000,  // 15 s inactivity before giving up
+    tls: { rejectUnauthorized: false },
   });
-  return transporter;
 }
 
 /**
  * Send the 6-digit PIN for password reset.
  */
 export async function sendPasswordResetPinEmail(to: string, pin: string): Promise<boolean> {
-  const transport = getTransporter();
+  const transport = createTransporter();
   if (!transport) return false;
   try {
     await transport.sendMail({
@@ -60,7 +65,7 @@ export async function sendPasswordResetPinEmail(to: string, pin: string): Promis
  * Send the 6-digit PIN to open the dashboard edit interface (refunds, clear data, etc.).
  */
 export async function sendClearDataPinEmail(to: string, pin: string): Promise<boolean> {
-  const transport = getTransporter();
+  const transport = createTransporter();
   if (!transport) return false;
   try {
     await transport.sendMail({
@@ -91,7 +96,7 @@ export async function sendGenericEmail(params: {
   text: string;
   html?: string;
 }): Promise<boolean> {
-  const transport = getTransporter();
+  const transport = createTransporter();
   if (!transport) return false;
   try {
     await transport.sendMail({

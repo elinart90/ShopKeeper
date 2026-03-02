@@ -495,6 +495,68 @@ export class ShopsService {
   /**
    * Owner-only (via dashboard edit token): reset data_cleared_at so the main dashboard shows all data again.
    */
+  /**
+   * Aggregated summary across ALL shops owned by userId.
+   * Used for the owner "All Stores" dashboard view.
+   */
+  async getOwnerSummary(userId: string, startDate?: string, endDate?: string) {
+    // 1. Fetch all shops the user owns.
+    const { data: shops } = await supabase
+      .from('shops')
+      .select('id, name, currency')
+      .eq('owner_id', userId);
+
+    const ownedShops = Array.isArray(shops) ? shops : [];
+    if (ownedShops.length === 0) return { shops: [], totals: { totalShops: 0, totalRevenue: 0, totalSales: 0, totalProducts: 0 } };
+
+    const shopIds = ownedShops.map((s) => s.id);
+    const startTs = startDate ? `${startDate}T00:00:00.000Z` : undefined;
+    const endTs = endDate ? `${endDate}T23:59:59.999Z` : undefined;
+
+    // 2. Fetch completed sales for all owned shops.
+    let salesQuery = supabase
+      .from('sales')
+      .select('id, shop_id, final_amount, created_at')
+      .in('shop_id', shopIds)
+      .eq('status', 'completed');
+    if (startTs) salesQuery = salesQuery.gte('created_at', startTs);
+    if (endTs) salesQuery = salesQuery.lte('created_at', endTs);
+    const { data: salesData } = await salesQuery;
+    const allSales = Array.isArray(salesData) ? salesData : [];
+
+    // 3. Fetch product counts per shop.
+    const { data: productsData } = await supabase
+      .from('products')
+      .select('id, shop_id')
+      .in('shop_id', shopIds)
+      .eq('is_active', true);
+    const allProducts = Array.isArray(productsData) ? productsData : [];
+
+    // 4. Build per-shop stats.
+    const shopStats = ownedShops.map((shop) => {
+      const shopSales = allSales.filter((s) => s.shop_id === shop.id);
+      const shopProducts = allProducts.filter((p) => p.shop_id === shop.id);
+      return {
+        id: shop.id,
+        name: shop.name,
+        currency: shop.currency || 'GHS',
+        totalSales: shopSales.length,
+        totalRevenue: shopSales.reduce((sum, s) => sum + Number(s.final_amount || 0), 0),
+        totalProducts: shopProducts.length,
+      };
+    });
+
+    // 5. Combined totals.
+    const totals = {
+      totalShops: ownedShops.length,
+      totalSales: allSales.length,
+      totalRevenue: allSales.reduce((sum, s) => sum + Number(s.final_amount || 0), 0),
+      totalProducts: allProducts.length,
+    };
+
+    return { shops: shopStats, totals };
+  }
+
   async resetDashboardView(shopId: string, userId: string) {
     const { data: shop } = await supabase.from('shops').select('id, owner_id').eq('id', shopId).single();
     if (!shop) throw new Error('Shop not found');

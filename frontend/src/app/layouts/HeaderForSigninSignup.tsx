@@ -1,9 +1,11 @@
-import { useState } from "react";
+import { useContext, useState } from "react";
 import { Link } from "react-router-dom";
 import { Menu, X } from "lucide-react";
 import { useAuth } from "../../contexts/useAuth";
 import { useOfflineStatus } from "../../hooks/useOfflineStatus";
 import { useSyncQueueCount } from "../../hooks/useSyncQueueCount";
+import { ShopContext } from "../../contexts/ShopContext";
+import NotificationBell from "../../components/NotificationBell";
 
 export default function Header() {
   const { user } = useAuth();
@@ -11,6 +13,8 @@ export default function Header() {
   const userDisplay = user?.name || user?.email || "Welcome!";
   const { online } = useOfflineStatus();
   const queue = useSyncQueueCount();
+  const shopCtx = useContext(ShopContext);
+  const shopId = shopCtx?.currentShop?.id;
 
   const mobileDashboardLinks = [
     { label: "Dashboard", to: "/dashboard?tab=overview" },
@@ -73,6 +77,7 @@ export default function Header() {
                   {queue.total} pending sync
                 </span>
               )}
+              <NotificationBell shopId={shopId} />
               <Link to="/dashboard" className="px-4 py-2 btn-primary-gradient">
                 Dashboard
               </Link>
@@ -82,7 +87,7 @@ export default function Header() {
         </nav>
       </div>
 
-      {/* Mobile header: hamburger left, logo right */}
+      {/* Mobile header: hamburger left, logo center, bell right */}
       <div className="md:hidden px-4 py-3 flex items-center justify-between gap-3">
         <div className="flex items-center">
           {user ? (
@@ -117,6 +122,13 @@ export default function Header() {
             ShopKeeper
           </h1>
         </Link>
+
+        {/* Bell icon on mobile — only when logged in */}
+        {user ? (
+          <NotificationBell shopId={shopId} />
+        ) : (
+          <div className="w-9" /> /* spacer to keep logo centered */
+        )}
       </div>
 
       {/* Mobile menu panel (logged in) */}

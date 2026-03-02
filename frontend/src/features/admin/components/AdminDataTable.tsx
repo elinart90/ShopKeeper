@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { motion } from 'framer-motion';
 
 export type AdminTableColumn<T> = {
   key: string;
@@ -12,23 +13,33 @@ type AdminDataTableProps<T> = {
   rows: T[];
   rowKey: (row: T, index: number) => string;
   emptyText?: string;
+  loading?: boolean;
 };
+
+const GLASS = {
+  background: 'rgba(17,24,39,0.75)',
+  border: '1px solid rgba(255,255,255,0.07)',
+  backdropFilter: 'blur(12px)',
+};
+
+const SKELETON_WIDTHS = ['72%', '55%', '80%', '60%', '75%'];
 
 export default function AdminDataTable<T>({
   columns,
   rows,
   rowKey,
   emptyText = 'No data found.',
+  loading,
 }: AdminDataTableProps<T>) {
   return (
-    <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
+    <div className="overflow-x-auto rounded-xl" style={GLASS}>
       <table className="min-w-full text-sm">
         <thead>
-          <tr className="border-b border-gray-200 dark:border-gray-700">
+          <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
             {columns.map((col) => (
               <th
                 key={col.key}
-                className={`px-4 py-3 text-left font-medium text-gray-500 dark:text-gray-400 ${col.className || ''}`}
+                className={`px-4 py-3 text-left text-[10px] uppercase tracking-[0.12em] font-bold text-gray-500 ${col.className || ''}`}
               >
                 {col.header}
               </th>
@@ -36,27 +47,46 @@ export default function AdminDataTable<T>({
           </tr>
         </thead>
         <tbody>
-          {rows.length === 0 ? (
+          {loading ? (
+            Array.from({ length: 5 }).map((_, i) => (
+              <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                {columns.map((col, ci) => (
+                  <td key={col.key} className="px-4 py-3">
+                    <div
+                      className="animate-pulse h-3 rounded"
+                      style={{
+                        background: 'rgba(255,255,255,0.05)',
+                        animationDelay: `${i * 60}ms`,
+                        width: SKELETON_WIDTHS[(i + ci) % SKELETON_WIDTHS.length],
+                      }}
+                    />
+                  </td>
+                ))}
+              </tr>
+            ))
+          ) : rows.length === 0 ? (
             <tr>
-              <td
-                colSpan={columns.length}
-                className="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400"
-              >
+              <td colSpan={columns.length} className="px-4 py-10 text-center text-sm text-gray-500">
                 {emptyText}
               </td>
             </tr>
           ) : (
             rows.map((row, index) => (
-              <tr
+              <motion.tr
                 key={rowKey(row, index)}
-                className="border-b border-gray-100 last:border-b-0 dark:border-gray-700/60"
+                initial={{ opacity: 0, x: -4 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ duration: 0.18, delay: Math.min(index * 0.025, 0.3), ease: 'easeOut' }}
+                style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}
+                onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.03)'; }}
+                onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
               >
                 {columns.map((col) => (
-                  <td key={col.key} className={`px-4 py-3 text-gray-800 dark:text-gray-200 ${col.className || ''}`}>
+                  <td key={col.key} className={`px-4 py-3 text-gray-300 ${col.className || ''}`}>
                     {col.render(row)}
                   </td>
                 ))}
-              </tr>
+              </motion.tr>
             ))
           )}
         </tbody>

@@ -43,6 +43,11 @@ export async function cacheProducts(shopId: string, products: any[]) {
   await offlineDb.productsCache.bulkPut(rows);
 }
 
+export async function replaceProductsCache(shopId: string, products: any[]) {
+  await offlineDb.productsCache.where("shopId").equals(shopId).delete();
+  await cacheProducts(shopId, products);
+}
+
 export async function getCachedProducts(shopId: string, opts?: { search?: string; lowStock?: boolean; outOfStock?: boolean }) {
   let rows = await offlineDb.productsCache.where("shopId").equals(shopId).toArray();
   rows = rows.filter((r) => r.is_active !== false);

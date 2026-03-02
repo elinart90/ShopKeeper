@@ -1,4 +1,4 @@
-import { Request, Response, NextFunction } from 'express';
+import { Response, NextFunction } from 'express';
 import { SalesService } from './sales.service';
 import { ShopRequest } from '../../middleware/requireShop';
 import { errorHandler, AppError } from '../../middleware/errorHandler';
@@ -42,10 +42,11 @@ export class SalesController {
     }
   }
 
-  async getSale(req: Request, res: Response, next: NextFunction) {
+  async getSale(req: ShopRequest, res: Response, next: NextFunction) {
     try {
+      if (!req.shopId) throw new AppError('Shop ID is required', 400);
       const id = getParam(req, 'id');
-      const sale = await salesService.getSaleById(id);
+      const sale = await salesService.getSaleById(id, req.shopId);
       res.json({ success: true, data: sale });
     } catch (error) {
       errorHandler(error as AppError, req, res, next);

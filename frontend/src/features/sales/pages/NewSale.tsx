@@ -17,10 +17,12 @@ import {
   Printer
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { inventoryApi, salesApi, paymentsApi, customersApi } from '../../../lib/api';
+import { inventoryApi, paymentsApi, customersApi } from '../../../lib/api';
 import { useShop } from '../../../contexts/useShop';
 import { useAuth } from '../../../contexts/useAuth';
-import { enqueueOperation } from '../../../offline/offlineQueue';
+import { enqueueOperation, processQueueOnce } from '../../../offline/offlineQueue';
+import { getCachedProducts } from '../../../offline/inventoryCache';
+import { cacheCustomers, getCachedCustomers } from '../../../offline/dashboardCache';
 import { useOfflineStatus } from '../../../hooks/useOfflineStatus';
 import { useSyncQueueCount } from '../../../hooks/useSyncQueueCount';
 import { decodeBarcodeFromImageFile, PRODUCT_BARCODE_FORMATS } from '../../../lib/barcodeImageDecoder';
@@ -120,6 +122,7 @@ export default function NewSale() {
   const [showNewCustomerForm, setShowNewCustomerForm] = useState(false);
   const [newCustomerName, setNewCustomerName] = useState('');
   const [newCustomerPhone, setNewCustomerPhone] = useState('');
+  const [newCustomerLocation, setNewCustomerLocation] = useState('');
   const [receiptPromptSale, setReceiptPromptSale] = useState<any | null>(null);
   const [receiptPhoneInput, setReceiptPhoneInput] = useState('');
   const [receiptPrinting, setReceiptPrinting] = useState(false);
@@ -153,21 +156,39 @@ export default function NewSale() {
     if (paymentMethod !== 'credit') return;
     if (!customerSearch.trim()) {
       setCustomerSearchResults([]);
-      customersApi.getCustomers().then((r) => setCustomerSearchResults((r.data.data || []).slice(0, 20))).catch(() => setCustomerSearchResults([]));
+      customersApi.getCustomers().then((r) => {
+        const list = (r.data.data || []).slice(0, 20);
+        setCustomerSearchResults(list);
+        if (currentShop?.id) cacheCustomers(currentShop.id, list);
+      }).catch(async () => {
+        if (currentShop?.id) {
+          const cached = await getCachedCustomers(currentShop.id);
+          setCustomerSearchResults(cached.slice(0, 20));
+        }
+      });
       return;
     }
-    const t = setTimeout(() => {
+    const t = setTimeout(async () => {
       setLoadingCustomers(true);
-      customersApi.getCustomers({ search: customerSearch }).then((r) => {
-        setCustomerSearchResults(r.data.data || []);
-      }).catch(() => setCustomerSearchResults([])).finally(() => setLoadingCustomers(false));
+      try {
+        const r = await customersApi.getCustomers({ search: customerSearch });
+        const list = r.data.data || [];
+        setCustomerSearchResults(list);
+        if (currentShop?.id) cacheCustomers(currentShop.id, list);
+      } catch {
+        if (currentShop?.id) {
+          const cached = await getCachedCustomers(currentShop.id, customerSearch);
+          setCustomerSearchResults(cached);
+        }
+      } finally {
+        setLoadingCustomers(false);
+      }
     }, 300);
     return () => clearTimeout(t);
-  }, [paymentMethod, customerSearch]);
+  }, [paymentMethod, customerSearch, currentShop]);
 
   const searchProducts = async () => {
-    if (!searchQuery.trim()) return;
-    
+    if (!searchQuery.trim() || !currentShop) return;
     setLoading(true);
     try {
       const response = await inventoryApi.getProducts({
@@ -176,8 +197,15 @@ export default function NewSale() {
       });
       setProducts(response.data.data || []);
     } catch (error: any) {
-      toast.error('Failed to search products');
-      console.error(error);
+      const isNetworkFail = !error?.response || error?.networkError || error?.code === 'ERR_NETWORK';
+      if (isNetworkFail) {
+        const cached = await getCachedProducts(currentShop.id, { search: searchQuery });
+        setProducts(cached);
+        if (cached.length === 0) toast('Offline – no cached results for this search');
+      } else {
+        toast.error('Failed to search products');
+        console.error(error);
+      }
     } finally {
       setLoading(false);
     }
@@ -626,38 +654,52 @@ export default function NewSale() {
       return;
     }
 
+    // Offline-first: write to Dexie queue FIRST, show receipt instantly, sync in background.
     setProcessing(true);
     try {
-      const response = await salesApi.create(saleData as any);
-      const sale = response.data.data;
-      toast.success('Sale completed successfully!');
-      setReceiptPromptSale(sale);
-      setReceiptPhoneInput(String(sale?.customer?.phone || ''));
+      const offlineId = `offline-${Date.now()}`;
+      const now = new Date().toISOString();
+
+      // 1. Build a local receipt so the UI can respond without waiting for the server.
+      const offlineSale = {
+        id: offlineId,
+        sale_number: `TMP-${Date.now().toString(36).toUpperCase()}`,
+        created_at: now,
+        payment_method: paymentMethod,
+        total_amount: subtotal,
+        discount_amount: discount,
+        final_amount: total,
+        items: cart.map(item => ({
+          quantity: item.quantity,
+          unit_price: item.unit_price,
+          total_price: item.total,
+          product: { name: item.name, unit: 'piece' },
+        })),
+        customer: creditCustomerId
+          ? { id: creditCustomerId, name: creditCustomerDisplay, phone: '' }
+          : undefined,
+      };
+
+      // 2. Write to Dexie queue FIRST — never blocked by the network.
+      await enqueueOperation({
+        entity: 'sale',
+        action: 'create',
+        method: 'post',
+        url: '/sales',
+        payload: saleData,
+        shopId: currentShop!.id,
+        dedupeKey: `sale:create:${offlineId}`,
+      });
+
+      // 3. Show receipt immediately (optimistic UI).
+      toast.success('Sale completed!');
+      setReceiptPromptSale(offlineSale as any);
+      setReceiptPhoneInput('');
+
+      // 4. Kick off background sync — if online this flushes the queue right now.
+      processQueueOnce().catch(() => {});
     } catch (error: any) {
-      const isNetworkFailure = !!error?.networkError || !error?.response;
-      if (isNetworkFailure && currentShop?.id) {
-        await enqueueOperation({
-          entity: 'sale',
-          action: 'create',
-          method: 'post',
-          url: '/sales',
-          payload: saleData,
-          shopId: currentShop.id,
-          dedupeKey: `sale:create:${Date.now()}`,
-        });
-        toast.success('Sale saved offline. It will sync automatically when online.');
-        setCart([]);
-        setDiscount(0);
-        setSearchQuery('');
-        setProducts([]);
-        setCreditCustomerId(null);
-        setCreditCustomerDisplay('');
-        setCustomerSearch('');
-        setCustomerSearchResults([]);
-        return;
-      }
-      const message = error.response?.data?.error?.message || 'Failed to complete sale';
-      toast.error(message);
+      toast.error('Failed to record sale');
       console.error(error);
     } finally {
       setProcessing(false);
@@ -666,9 +708,22 @@ export default function NewSale() {
 
   const handleSkipReceipt = () => {
     const saleId = receiptPromptSale?.id;
+    const isOfflineSale = String(saleId || '').startsWith('offline-');
     setReceiptPromptSale(null);
     setReceiptPhoneInput('');
-    if (saleId) navigate(`/sales/${saleId}`);
+    if (!isOfflineSale && saleId) {
+      navigate(`/sales/${saleId}`);
+    } else {
+      // Offline sale has no server-side page yet — clear cart and stay on new-sale screen.
+      setCart([]);
+      setDiscount(0);
+      setSearchQuery('');
+      setProducts([]);
+      setCreditCustomerId(null);
+      setCreditCustomerDisplay('');
+      setCustomerSearch('');
+      setCustomerSearchResults([]);
+    }
   };
 
   const handlePrintReceipt = () => {
@@ -1052,14 +1107,21 @@ export default function NewSale() {
                     </label>
                     {creditCustomerId ? (
                       <div className="flex items-center justify-between gap-2 py-2 px-3 rounded-lg bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600">
-                        <span className="text-gray-900 dark:text-white font-medium">{creditCustomerDisplay}</span>
+                        <div className="min-w-0">
+                          <span className="text-gray-900 dark:text-white font-medium block">{creditCustomerDisplay}</span>
+                          {customerSearchResults.find(c => c.id === creditCustomerId)?.location && (
+                            <span className="text-xs text-gray-500 dark:text-gray-400">
+                              📍 {customerSearchResults.find(c => c.id === creditCustomerId)?.location}
+                            </span>
+                          )}
+                        </div>
                         <button
                           type="button"
                           onClick={() => {
                             setCreditCustomerId(null);
                             setCreditCustomerDisplay('');
                           }}
-                          className="text-sm text-red-600 dark:text-red-400 hover:underline"
+                          className="text-sm text-red-600 dark:text-red-400 hover:underline shrink-0"
                         >
                           Change
                         </button>
@@ -1077,7 +1139,7 @@ export default function NewSale() {
                           <p className="text-xs text-gray-500">Searching...</p>
                         )}
                         {customerSearchResults.length > 0 && (
-                          <ul className="max-h-40 overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-600">
+                          <ul className="max-h-48 overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-600">
                             {customerSearchResults.map((c) => (
                               <li key={c.id}>
                                 <button
@@ -1088,9 +1150,16 @@ export default function NewSale() {
                                     setCustomerSearch('');
                                     setCustomerSearchResults([]);
                                   }}
-                                  className="w-full text-left px-3 py-2 text-sm text-gray-900 dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700"
+                                  className="w-full text-left px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700"
                                 >
-                                  {c.name} {c.phone && ` · ${c.phone}`} {c.email && ` · ${c.email}`}
+                                  <p className="text-sm text-gray-900 dark:text-white font-medium">
+                                    {c.name}
+                                    {c.phone && <span className="text-gray-500 dark:text-gray-400 font-normal"> · {c.phone}</span>}
+                                    {c.email && <span className="text-gray-500 dark:text-gray-400 font-normal"> · {c.email}</span>}
+                                  </p>
+                                  {(c as any).location && (
+                                    <p className="text-xs text-gray-400 mt-0.5">📍 {(c as any).location}</p>
+                                  )}
                                 </button>
                               </li>
                             ))}
@@ -1106,9 +1175,10 @@ export default function NewSale() {
                           </button>
                         ) : (
                           <div className="space-y-2 pt-2 border-t border-amber-200 dark:border-amber-800">
+                            <p className="text-xs text-gray-500 dark:text-gray-400 font-medium">New customer details</p>
                             <input
                               type="text"
-                              placeholder="Customer name"
+                              placeholder="Customer name *"
                               value={newCustomerName}
                               onChange={(e) => setNewCustomerName(e.target.value)}
                               className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
@@ -1118,6 +1188,13 @@ export default function NewSale() {
                               placeholder="Phone (optional)"
                               value={newCustomerPhone}
                               onChange={(e) => setNewCustomerPhone(e.target.value)}
+                              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+                            />
+                            <input
+                              type="text"
+                              placeholder="Location / Area (optional)"
+                              value={newCustomerLocation}
+                              onChange={(e) => setNewCustomerLocation(e.target.value)}
                               className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
                             />
                             <div className="flex gap-2">
@@ -1132,13 +1209,17 @@ export default function NewSale() {
                                     const res = await customersApi.create({
                                       name: newCustomerName.trim(),
                                       phone: newCustomerPhone.trim() || undefined,
+                                      location: newCustomerLocation.trim() || undefined,
                                     });
                                     const c = res.data.data;
                                     setCreditCustomerId(c.id);
-                                    setCreditCustomerDisplay([c.name, c.phone].filter(Boolean).join(' · '));
+                                    const parts = [c.name, c.phone].filter(Boolean);
+                                    if (c.location) parts.push(c.location);
+                                    setCreditCustomerDisplay(parts.join(' · '));
                                     setShowNewCustomerForm(false);
                                     setNewCustomerName('');
                                     setNewCustomerPhone('');
+                                    setNewCustomerLocation('');
                                     toast.success('Customer added');
                                   } catch (err: any) {
                                     toast.error(err.response?.data?.error?.message || 'Failed to add customer');
@@ -1154,6 +1235,7 @@ export default function NewSale() {
                                   setShowNewCustomerForm(false);
                                   setNewCustomerName('');
                                   setNewCustomerPhone('');
+                                  setNewCustomerLocation('');
                                 }}
                                 className="px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 text-sm text-gray-700 dark:text-gray-300"
                               >

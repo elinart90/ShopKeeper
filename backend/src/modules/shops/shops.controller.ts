@@ -43,6 +43,17 @@ export class ShopsController {
     }
   }
 
+  async getOwnerSummary(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.userId) throw new AppError('User ID is required', 401);
+      const { startDate, endDate } = req.query as Record<string, string>;
+      const data = await shopsService.getOwnerSummary(req.userId, startDate, endDate);
+      res.json({ success: true, data });
+    } catch (error) {
+      errorHandler(error as AppError, req, res, next);
+    }
+  }
+
   async updateShop(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       if (!req.userId) {

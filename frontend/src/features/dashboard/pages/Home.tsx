@@ -33,6 +33,7 @@ import { useShop } from "../../../contexts/useShop";
 import { useAuth } from "../../../contexts/useAuth";
 import { useTheme } from "../../../contexts/ThemeContext";
 import { reportsApi, walletsApi, dailyCloseApi, shopsApi, salesApi, authApi, clearShopId, controlsApi } from "../../../lib/api";
+import { cacheDashboardStats, getCachedDashboardStats, cacheCustomers, getCachedCustomers } from "../../../offline/dashboardCache";
 import type {
   BusinessIntelligenceData,
   BusinessIntelligenceQueryData,
@@ -160,22 +161,35 @@ function ShopSwitcher({
   shops,
   onSelect,
   onCreate,
+  allStoresMode,
+  onAllStores,
 }: {
   currentShop: { id: string; name: string };
-  shops: Array<{ id: string; name: string }>;
+  shops: Array<{ id: string; name: string; role?: string }>;
   onSelect: (shop: { id: string; name: string }) => void;
   onCreate: () => void;
+  allStoresMode?: boolean;
+  onAllStores?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const otherShops = shops.filter((s) => s.id !== currentShop.id);
+  const ownedShops = shops.filter((s) => s.role === "owner");
+  const showAllStores = ownedShops.length > 1 && onAllStores;
+
+  const displayName = allStoresMode ? "All Stores" : currentShop.name;
+
   return (
     <div className="relative">
       <button
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm hover:bg-gray-50 dark:hover:bg-gray-600"
+        className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border text-sm ${
+          allStoresMode
+            ? "border-emerald-400 bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300"
+            : "border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white hover:bg-gray-50 dark:hover:bg-gray-600"
+        }`}
       >
-        <Package className="h-4 w-4 text-emerald-500" />
-        <span>{currentShop.name}</span>
+        <Package className={`h-4 w-4 ${allStoresMode ? "text-emerald-500" : "text-emerald-500"}`} />
+        <span>{displayName}</span>
         <ChevronDown
           className={`h-4 w-4 transition-transform ${open ? "rotate-180" : ""}`}
         />
@@ -188,16 +202,40 @@ function ShopSwitcher({
             aria-hidden
           />
           <div className="absolute right-0 top-full mt-1 py-1 w-56 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-lg z-20">
-            {otherShops.map((shop) => (
+            {showAllStores && (
+              <button
+                onClick={() => {
+                  onAllStores?.();
+                  setOpen(false);
+                }}
+                className={`w-full px-4 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 ${
+                  allStoresMode
+                    ? "text-emerald-600 dark:text-emerald-400 font-medium"
+                    : "text-gray-700 dark:text-gray-300"
+                }`}
+              >
+                <BarChart3 className="h-3.5 w-3.5" />
+                All Stores (Owner View)
+              </button>
+            )}
+            {shops.map((shop) => (
               <button
                 key={shop.id}
                 onClick={() => {
                   onSelect(shop);
                   setOpen(false);
                 }}
-                className="w-full px-4 py-2 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
+                className={`w-full px-4 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 ${
+                  !allStoresMode && shop.id === currentShop.id
+                    ? "text-emerald-600 dark:text-emerald-400 font-medium"
+                    : "text-gray-700 dark:text-gray-300"
+                }`}
               >
+                <Package className="h-3.5 w-3.5" />
                 {shop.name}
+                {shop.role === "owner" && (
+                  <span className="ml-auto text-xs text-gray-400">owner</span>
+                )}
               </button>
             ))}
             <button
@@ -207,7 +245,7 @@ function ShopSwitcher({
               }}
               className="w-full px-4 py-2 text-left text-sm text-emerald-600 dark:text-emerald-400 hover:bg-gray-100 dark:hover:bg-gray-700 border-t border-gray-100 dark:border-gray-700"
             >
-              + Create new shop
+              + Create new store
             </button>
           </div>
         </>
@@ -224,6 +262,12 @@ export default function Home() {
   const [stats, setStats] = useState<any>(null);
   const [intelligence, setIntelligence] = useState<any>(null);
   const [loadingStats, setLoadingStats] = useState(true);
+  const [allStoresMode, setAllStoresMode] = useState(false);
+  const [ownerSummary, setOwnerSummary] = useState<{
+    shops: Array<{ id: string; name: string; currency: string; totalSales: number; totalRevenue: number; totalProducts: number }>;
+    totals: { totalShops: number; totalRevenue: number; totalSales: number; totalProducts: number };
+  } | null>(null);
+  const [loadingOwnerSummary, setLoadingOwnerSummary] = useState(false);
   const [searchParams] = useSearchParams();
   const [dateRange, setDateRange] = useState<{ start: string; end: string }>(() => {
     const d = new Date();
@@ -237,11 +281,13 @@ export default function Home() {
   const liveTime = useLiveTime();
 
   useEffect(() => {
-    if (currentShop) {
+    if (allStoresMode) {
+      loadOwnerSummary();
+    } else if (currentShop) {
       loadStats();
       loadIntelligence();
     }
-  }, [currentShop, dateRange.start, dateRange.end]);
+  }, [currentShop, allStoresMode, dateRange.start, dateRange.end]);
 
   useEffect(() => {
     if (currentShop?.role !== "owner" && OWNER_ONLY_TAB_IDS.includes(activeTab)) {
@@ -268,10 +314,29 @@ export default function Home() {
         endDate: dateRange.end,
       });
       setStats(res.data.data);
+      await cacheDashboardStats(currentShop.id, res.data.data);
     } catch (e: any) {
+      const cached = await getCachedDashboardStats(currentShop.id);
+      if (cached) {
+        setStats(cached);
+        toast("Offline – showing last saved dashboard", { icon: "📦" });
+      }
       console.error("Failed to load stats:", e);
     } finally {
       setLoadingStats(false);
+    }
+  };
+
+  const loadOwnerSummary = async () => {
+    setLoadingOwnerSummary(true);
+    try {
+      const res = await shopsApi.getOwnerSummary({ startDate: dateRange.start, endDate: dateRange.end });
+      setOwnerSummary(res.data.data);
+    } catch (e) {
+      toast.error("Failed to load owner summary");
+      console.error(e);
+    } finally {
+      setLoadingOwnerSummary(false);
     }
   };
 
@@ -448,9 +513,11 @@ export default function Home() {
               shops={shops}
               onSelect={(s) => {
                 const full = shops.find((sh) => sh.id === s.id);
-                if (full) selectShop(full);
+                if (full) { setAllStoresMode(false); selectShop(full); }
               }}
               onCreate={() => navigate("/shops/create")}
+              allStoresMode={allStoresMode}
+              onAllStores={() => setAllStoresMode(true)}
             />
           </div>
         </div>
@@ -515,9 +582,11 @@ export default function Home() {
             shops={shops}
             onSelect={(s) => {
               const full = shops.find((sh) => sh.id === s.id);
-              if (full) selectShop(full);
+              if (full) { setAllStoresMode(false); selectShop(full); }
             }}
             onCreate={() => navigate("/shops/create")}
+            allStoresMode={allStoresMode}
+            onAllStores={() => setAllStoresMode(true)}
           />
         </div>
       </div>
@@ -544,7 +613,19 @@ export default function Home() {
 
       {/* Content */}
       <div className="p-4 max-w-7xl mx-auto min-h-[320px]">
-        {activeTab === "overview" && (
+        {/* All-Stores owner view */}
+        {allStoresMode && activeTab === "overview" && (
+          <AllStoresOverview
+            summary={ownerSummary}
+            loading={loadingOwnerSummary}
+            dateRangeLabel={formatDateRange(dateRange.start, dateRange.end)}
+            onSelectShop={(shopId) => {
+              const s = shops.find((sh) => sh.id === shopId);
+              if (s) { setAllStoresMode(false); selectShop(s); }
+            }}
+          />
+        )}
+        {(!allStoresMode || activeTab !== "overview") && activeTab === "overview" && (
           <OverviewTab
             currency={currency}
             stats={stats}
@@ -577,6 +658,96 @@ export default function Home() {
         {activeTab === "credit" && <CreditTab onNavigate={navigate} />}
         {activeTab === "reports" && <ReportsTab />}
         {activeTab === "settings" && <SettingsTab />}
+      </div>
+    </div>
+  );
+}
+
+function AllStoresOverview({
+  summary,
+  loading,
+  dateRangeLabel,
+  onSelectShop,
+}: {
+  summary: { shops: Array<{ id: string; name: string; currency: string; totalSales: number; totalRevenue: number; totalProducts: number }>; totals: { totalShops: number; totalRevenue: number; totalSales: number; totalProducts: number } } | null;
+  loading: boolean;
+  dateRangeLabel: string;
+  onSelectShop: (shopId: string) => void;
+}) {
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-16">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-500" />
+      </div>
+    );
+  }
+
+  const shops = summary?.shops || [];
+  const totals = summary?.totals;
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-xl font-bold text-gray-900 dark:text-white">All Stores — Owner View</h2>
+          <p className="text-sm text-gray-500 dark:text-gray-400">{dateRangeLabel}</p>
+        </div>
+        <span className="text-xs bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 px-2 py-1 rounded-full">
+          {totals?.totalShops ?? 0} stores
+        </span>
+      </div>
+
+      {/* Combined totals */}
+      {totals && (
+        <div className="grid grid-cols-3 gap-4">
+          <div className="bg-white dark:bg-gray-800 rounded-xl p-4 border border-gray-200 dark:border-gray-700">
+            <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Total Revenue</p>
+            <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">
+              GHS {totals.totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </p>
+          </div>
+          <div className="bg-white dark:bg-gray-800 rounded-xl p-4 border border-gray-200 dark:border-gray-700">
+            <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Total Sales</p>
+            <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">{totals.totalSales.toLocaleString()}</p>
+          </div>
+          <div className="bg-white dark:bg-gray-800 rounded-xl p-4 border border-gray-200 dark:border-gray-700">
+            <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Total Products</p>
+            <p className="text-2xl font-bold text-gray-700 dark:text-gray-300">{totals.totalProducts.toLocaleString()}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Per-store breakdown */}
+      <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+        <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-700">
+          <h3 className="font-semibold text-gray-900 dark:text-white text-sm">Breakdown by Store</h3>
+        </div>
+        {shops.length === 0 ? (
+          <p className="text-center text-gray-400 py-8 text-sm">No data for this period</p>
+        ) : (
+          <div className="divide-y divide-gray-100 dark:divide-gray-700">
+            {shops.map((shop) => (
+              <div key={shop.id} className="flex items-center px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-750">
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-gray-900 dark:text-white text-sm truncate">{shop.name}</p>
+                  <p className="text-xs text-gray-400">{shop.totalProducts} products</p>
+                </div>
+                <div className="text-right mr-4">
+                  <p className="text-sm font-semibold text-emerald-600 dark:text-emerald-400">
+                    {shop.currency} {shop.totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </p>
+                  <p className="text-xs text-gray-400">{shop.totalSales} sales</p>
+                </div>
+                <button
+                  onClick={() => onSelectShop(shop.id)}
+                  className="text-xs text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300 px-2 py-1 rounded border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-50 dark:hover:bg-emerald-900/20"
+                >
+                  View
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

@@ -35,15 +35,77 @@ export interface CachedProduct {
   updatedAt: string;
 }
 
+export interface CachedDashboard {
+  key: string; // `${shopId}:stats`
+  shopId: string;
+  data: any;
+  savedAt: string;
+}
+
+export interface CachedCustomer {
+  key: string; // `${shopId}:${customerId}`
+  shopId: string;
+  customerId: string;
+  name: string;
+  phone?: string;
+  email?: string;
+  updatedAt: string;
+}
+
+/** Key-value store used to pass credentials to the service worker (Background Sync). */
+export interface SwConfigEntry {
+  key: string;
+  value: string;
+}
+
+export type NotifType = 'low_stock' | 'overdue_credit' | 'sync_error' | 'new_sale';
+
+export interface AppNotification {
+  id?: number;
+  notifId: string;
+  type: NotifType;
+  title: string;
+  message: string;
+  shopId: string;
+  read: boolean;
+  createdAt: string;
+  meta?: Record<string, any>;
+}
+
 class ShoopkeeperOfflineDB extends Dexie {
   syncQueue!: Table<SyncQueueItem, number>;
   productsCache!: Table<CachedProduct, string>;
+  dashboardCache!: Table<CachedDashboard, string>;
+  customersCache!: Table<CachedCustomer, string>;
+  swConfig!: Table<SwConfigEntry, string>;
+  notifications!: Table<AppNotification, number>;
 
   constructor() {
     super("shoopkeeper-offline-db");
     this.version(1).stores({
       syncQueue: "++id, opId, status, entity, action, shopId, dedupeKey, createdAt, updatedAt",
       productsCache: "key, shopId, productId, name, barcode, sku, updatedAt",
+    });
+    this.version(2).stores({
+      syncQueue: "++id, opId, status, entity, action, shopId, dedupeKey, createdAt, updatedAt",
+      productsCache: "key, shopId, productId, name, barcode, sku, updatedAt",
+      dashboardCache: "key, shopId, savedAt",
+      customersCache: "key, shopId, customerId, name, updatedAt",
+    });
+    this.version(3).stores({
+      syncQueue: "++id, opId, status, entity, action, shopId, dedupeKey, createdAt, updatedAt",
+      productsCache: "key, shopId, productId, name, barcode, sku, updatedAt",
+      dashboardCache: "key, shopId, savedAt",
+      customersCache: "key, shopId, customerId, name, updatedAt",
+      swConfig: "key",
+    });
+    this.version(4).stores({
+      syncQueue: "++id, opId, status, entity, action, shopId, dedupeKey, createdAt, updatedAt",
+      productsCache: "key, shopId, productId, name, barcode, sku, updatedAt",
+      dashboardCache: "key, shopId, savedAt",
+      customersCache: "key, shopId, customerId, name, updatedAt",
+      swConfig: "key",
+      notifications: "++id, notifId, type, shopId, read, createdAt",
     });
   }
 }

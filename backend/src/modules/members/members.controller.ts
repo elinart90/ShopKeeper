@@ -1,4 +1,4 @@
-import { Request, Response, NextFunction } from 'express';
+import { Response, NextFunction } from 'express';
 import { MembersService } from './members.service';
 import { ShopRequest } from '../../middleware/requireShop';
 import { errorHandler, AppError } from '../../middleware/errorHandler';
@@ -34,10 +34,11 @@ export class MembersController {
     }
   }
 
-  async getCustomer(req: Request, res: Response, next: NextFunction) {
+  async getCustomer(req: ShopRequest, res: Response, next: NextFunction) {
     try {
+      if (!req.shopId) throw new AppError('Shop ID is required', 400);
       const id = getParam(req, 'id');
-      const customer = await membersService.getCustomerById(id);
+      const customer = await membersService.getCustomerById(id, req.shopId);
       res.json({ success: true, data: customer });
     } catch (error) {
       errorHandler(error as AppError, req, res, next);

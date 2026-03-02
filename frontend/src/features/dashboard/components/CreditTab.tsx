@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useShop } from "../../../contexts/useShop";
 import { customersApi, paymentsApi } from "../../../lib/api";
+import { checkCreditNotifications } from "../../../offline/notificationsCache";
 import type { AutoCreditRemindersData, CreditIntelligenceData, CreditIntelligenceQueryData } from "../../../lib/api";
 import { useAuth } from "../../../contexts/useAuth";
 import toast from "react-hot-toast";
@@ -19,6 +20,7 @@ export default function CreditTab({ onNavigate }: { onNavigate: (path: string) =
       name: string;
       phone?: string;
       email?: string;
+      location?: string | null;
       credit_balance: number;
       credit_limit: number;
     }>;
@@ -44,8 +46,13 @@ export default function CreditTab({ onNavigate }: { onNavigate: (path: string) =
       customersApi.getCreditIntelligence({ lookbackDays }),
     ])
       .then(([summaryRes, intelRes]) => {
-        setData(summaryRes.data.data);
+        const summary = summaryRes.data.data;
+        setData(summary);
         setIntel(intelRes.data.data);
+        // Fire credit notifications for customers at/over their limit
+        if (currentShop?.id && summary?.customersOwing?.length) {
+          checkCreditNotifications(currentShop.id, summary.customersOwing).catch(() => {});
+        }
       })
       .catch(() => {
         setData({ totalExposure: 0, count: 0, customersOwing: [] });
@@ -356,6 +363,9 @@ export default function CreditTab({ onNavigate }: { onNavigate: (path: string) =
                       <th className="text-left px-4 py-2 text-gray-700 dark:text-gray-300 font-medium">
                         Contact
                       </th>
+                      <th className="text-left px-4 py-2 text-gray-700 dark:text-gray-300 font-medium">
+                        Location
+                      </th>
                       <th className="text-right px-4 py-2 text-gray-700 dark:text-gray-300 font-medium">
                         Balance
                       </th>
@@ -379,6 +389,14 @@ export default function CreditTab({ onNavigate }: { onNavigate: (path: string) =
                         </td>
                         <td className="px-4 py-2 text-gray-600 dark:text-gray-400">
                           {c.phone || c.email || "—"}
+                        </td>
+                        <td className="px-4 py-2 text-gray-600 dark:text-gray-400">
+                          {c.location ? (
+                            <span className="flex items-center gap-1">
+                              <span className="text-xs">📍</span>
+                              {c.location}
+                            </span>
+                          ) : "—"}
                         </td>
                         <td className="px-4 py-2 text-right font-medium text-amber-600 dark:text-amber-400">
                           {fmt(c.credit_balance)}

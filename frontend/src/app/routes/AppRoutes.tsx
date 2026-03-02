@@ -1,41 +1,77 @@
 // src/app/routes/AppRoutes.tsx
+import { lazy, Suspense, useEffect, useState } from "react";
+import type { ReactElement } from "react";
 import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 
-import Welcome from "../../features/onboarding/pages/Welcome";
+// ── Always-eager (tiny, needed on first paint) ────────────────────────────
 import Header from "../layouts/HeaderForSigninSignup";
-import SignInPage from "../../features/auth/pages/SignInPage";
-import SignUpPage from "../../features/auth/pages/SignUpPage";
-import ForgotPasswordPage from "../../features/auth/pages/ForgotPasswordPage";
-import VerifyReceiptPage from "../../features/public/pages/VerifyReceiptPage";
-import Dashboard from "../../features/dashboard/pages/Home";
-import DashboardEditPage from "../../features/dashboard/pages/DashboardEditPage";
-import CreateShopPage from "../../features/shops/pages/CreateShopPage";
-import NewSale from "../../features/sales/pages/NewSale";
-import SaleDetailPage from "../../features/sales/pages/SaleDetailPage";
-import InventoryList from "../../features/inventory/pages/InventoryList";
-import AddProductPage from "../../features/inventory/pages/AddProductPage";
-import EditProductPage from "../../features/inventory/pages/EditProductPage";
-import ExpensesPage from "../../features/expenses/pages/ExpensesPage";
-import PaymentCallbackPage from "../../features/payments/pages/PaymentCallbackPage";
-import SubscriptionPage from "../../features/subscriptions/pages/SubscriptionPage";
-import SubscriptionCallbackPage from "../../features/subscriptions/pages/SubscriptionCallbackPage";
-import NotFoundPage from "../../features/error/pages/NotFoundPage";
-import SyncCenterPage from "../../features/sync/pages/SyncCenterPage";
-import SuperAdminLayout from "../../features/admin/pages/SuperAdminLayout";
-import AdminOverviewPage from "../../features/admin/pages/AdminOverviewPage";
-import AdminUsersPage, { AdminAiIntelligencePage } from "../../features/admin/pages/AdminUsersPage";
-import AdminTransactionsPage from "../../features/admin/pages/AdminTransactionsPage";
-import AdminUserDetailPage from "../../features/admin/pages/AdminUserDetailPage";
-import AdminShopsPage from "../../features/admin/pages/AdminShopsPage";
-import AdminShopDetailPage from "../../features/admin/pages/AdminShopDetailPage";
-import AdminAuditLogsPage from "../../features/admin/pages/AdminAuditLogsPage";
-import AdminSecurityPage from "../../features/admin/pages/AdminSecurityPage";
-import AdminMonetizationPage from "../../features/admin/pages/AdminMonetizationPage";
 import RequireSuperAdmin from "../../features/admin/components/RequireSuperAdmin";
 import { useAuth } from "../../contexts/useAuth";
 import { authApi, shopsApi, subscriptionsApi } from "../../lib/api";
-import type { ReactElement } from "react";
-import { useEffect, useState } from "react";
+
+// ── Lazy-loaded page chunks ───────────────────────────────────────────────
+// Auth / public
+const Welcome                 = lazy(() => import("../../features/onboarding/pages/Welcome"));
+const SignInPage               = lazy(() => import("../../features/auth/pages/SignInPage"));
+const SignUpPage               = lazy(() => import("../../features/auth/pages/SignUpPage"));
+const ForgotPasswordPage       = lazy(() => import("../../features/auth/pages/ForgotPasswordPage"));
+const VerifyReceiptPage        = lazy(() => import("../../features/public/pages/VerifyReceiptPage"));
+const SubscriptionPage         = lazy(() => import("../../features/subscriptions/pages/SubscriptionPage"));
+const SubscriptionCallbackPage = lazy(() => import("../../features/subscriptions/pages/SubscriptionCallbackPage"));
+const NotFoundPage             = lazy(() => import("../../features/error/pages/NotFoundPage"));
+
+// Core app — highest priority (pre-warmed below)
+const NewSale        = lazy(() => import("../../features/sales/pages/NewSale"));
+const Dashboard      = lazy(() => import("../../features/dashboard/pages/Home"));
+const InventoryList  = lazy(() => import("../../features/inventory/pages/InventoryList"));
+
+// Secondary app pages
+const DashboardEditPage  = lazy(() => import("../../features/dashboard/pages/DashboardEditPage"));
+const CreateShopPage     = lazy(() => import("../../features/shops/pages/CreateShopPage"));
+const SaleDetailPage     = lazy(() => import("../../features/sales/pages/SaleDetailPage"));
+const AddProductPage     = lazy(() => import("../../features/inventory/pages/AddProductPage"));
+const EditProductPage    = lazy(() => import("../../features/inventory/pages/EditProductPage"));
+const ExpensesPage       = lazy(() => import("../../features/expenses/pages/ExpensesPage"));
+const PaymentCallbackPage = lazy(() => import("../../features/payments/pages/PaymentCallbackPage"));
+const SyncCenterPage     = lazy(() => import("../../features/sync/pages/SyncCenterPage"));
+
+// Super-admin (large bundle — only loaded when navigating to /super-admin)
+const SuperAdminLayout        = lazy(() => import("../../features/admin/pages/SuperAdminLayout"));
+const AdminOverviewPage       = lazy(() => import("../../features/admin/pages/AdminOverviewPage"));
+const AdminUsersPage          = lazy(() => import("../../features/admin/pages/AdminUsersPage"));
+const AdminAiIntelligencePage = lazy(() => import("../../features/admin/pages/AdminAiIntelligencePage"));
+const AdminTransactionsPage   = lazy(() => import("../../features/admin/pages/AdminTransactionsPage"));
+const AdminUserDetailPage     = lazy(() => import("../../features/admin/pages/AdminUserDetailPage"));
+const AdminShopsPage          = lazy(() => import("../../features/admin/pages/AdminShopsPage"));
+const AdminShopDetailPage     = lazy(() => import("../../features/admin/pages/AdminShopDetailPage"));
+const AdminAuditLogsPage      = lazy(() => import("../../features/admin/pages/AdminAuditLogsPage"));
+const AdminSecurityPage       = lazy(() => import("../../features/admin/pages/AdminSecurityPage"));
+const AdminMonetizationPage   = lazy(() => import("../../features/admin/pages/AdminMonetizationPage"));
+
+// ── Shared loading fallback ───────────────────────────────────────────────
+function PageLoader() {
+  return (
+    <div className="min-h-[60vh] flex items-center justify-center">
+      <div className="h-6 w-6 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+    </div>
+  );
+}
+
+// ── Pre-warm the 3 most-visited pages after the app shell loads ───────────
+// This fires a background import so the chunks are in the browser cache
+// before the user clicks, eliminating the waterfall delay entirely.
+function PrewarmCriticalChunks() {
+  useEffect(() => {
+    // Stagger slightly so we don't compete with the current paint
+    const t = window.setTimeout(() => {
+      import("../../features/sales/pages/NewSale");
+      import("../../features/dashboard/pages/Home");
+      import("../../features/inventory/pages/InventoryList");
+    }, 1500);
+    return () => window.clearTimeout(t);
+  }, []);
+  return null;
+}
 
 function RequireAuth({ children }: { children: ReactElement }) {
   const { user, loading } = useAuth();
@@ -144,156 +180,104 @@ export default function AppRoutes() {
 
   return (
     <>
-      {/* Header shows on public pages */}
+      <PrewarmCriticalChunks />
+
+      {/* Header shows on all pages */}
       <Routes>
         <Route path="*" element={<Header />} />
       </Routes>
-      
-      <Routes>
-        {/* Public routes */}
-        <Route 
-          path="/" 
-          element={
-            user ? <Navigate to="/dashboard" replace /> : <Welcome />
-          } 
-        />
-        
-        <Route path="/sign-in" element={user ? <Navigate to="/dashboard" replace /> : <SignInPage />} />
-        <Route path="/sign-up" element={user ? <Navigate to="/dashboard" replace /> : <SignUpPage />} />
-        <Route path="/forgot-password" element={user ? <Navigate to="/dashboard" replace /> : <ForgotPasswordPage />} />
-        <Route path="/verify/:receiptRef" element={<VerifyReceiptPage />} />
-        <Route
-          path="/subscription"
-          element={
-            <RequireAuth>
-              <SubscriptionPage />
-            </RequireAuth>
-          }
-        />
-        <Route
-          path="/subscription/callback"
-          element={
-            <RequireAuth>
-              <SubscriptionCallbackPage />
-            </RequireAuth>
-          }
-        />
-        
-        {/* Protected routes */}
-        <Route
-          path="/dashboard"
-          element={
-            <RequireAppAccess>
-              <Dashboard />
-            </RequireAppAccess>
-          }
-        />
-        <Route
-          path="/dashboard/edit"
-          element={
-            <RequireAppAccess>
-              <DashboardEditPage />
-            </RequireAppAccess>
-          }
-        />
-        <Route
-          path="/shops/create"
-          element={
-            <RequireAppAccess>
-              <CreateShopPage />
-            </RequireAppAccess>
-          }
-        />
-        <Route 
-          path="/sales/new" 
-          element={
-            <RequireAppAccess>
-              <NewSale />
-            </RequireAppAccess>
-          } 
-        />
-        <Route 
-          path="/sales/:id" 
-          element={
-            <RequireAppAccess>
-              <SaleDetailPage />
-            </RequireAppAccess>
-          } 
-        />
-        
-        <Route 
-          path="/inventory" 
-          element={
-            <RequireAppAccess>
-              <InventoryList />
-            </RequireAppAccess>
-          } 
-        />
-        <Route 
-          path="/inventory/add" 
-          element={
-            <RequireAppAccess>
-              <AddProductPage />
-            </RequireAppAccess>
-          } 
-        />
-        <Route 
-          path="/inventory/:id/edit" 
-          element={
-            <RequireAppAccess>
-              <EditProductPage />
-            </RequireAppAccess>
-          } 
-        />
-        <Route 
-          path="/expenses" 
-          element={
-            <RequireAppAccess>
-              <ExpensesPage />
-            </RequireAppAccess>
-          } 
-        />
-        <Route
-          path="/payments/callback"
-          element={
-            <RequireAppAccess>
-              <PaymentCallbackPage />
-            </RequireAppAccess>
-          }
-        />
-        <Route
-          path="/sync-center"
-          element={
-            <RequireAppAccess>
-              <SyncCenterPage />
-            </RequireAppAccess>
-          }
-        />
 
-        {/* Super admin area */}
-        <Route
-          path="/super-admin"
-          element={
-            <RequireSuperAdmin>
-              <SuperAdminLayout />
-            </RequireSuperAdmin>
-          }
-        >
-          <Route index element={<AdminOverviewPage />} />
-          <Route path="ai-intelligence" element={<AdminAiIntelligencePage />} />
-          <Route path="users" element={<AdminUsersPage />} />
-          <Route path="transactions" element={<AdminTransactionsPage />} />
-          <Route path="users/:id" element={<AdminUserDetailPage />} />
-          <Route path="shops" element={<AdminShopsPage />} />
-          <Route path="shops/:id" element={<AdminShopDetailPage />} />
-          <Route path="security" element={<AdminSecurityPage />} />
-          <Route path="monetization" element={<AdminMonetizationPage />} />
-          <Route path="audit-logs" element={<AdminAuditLogsPage />} />
-        </Route>
-        
-        {/* Fallback */}
-        <Route path="*" element={<NotFoundPage />} />
-      </Routes>
+      <Suspense fallback={<PageLoader />}>
+        <Routes>
+          {/* Public routes */}
+          <Route
+            path="/"
+            element={user ? <Navigate to="/dashboard" replace /> : <Welcome />}
+          />
+          <Route path="/sign-in" element={user ? <Navigate to="/dashboard" replace /> : <SignInPage />} />
+          <Route path="/sign-up" element={user ? <Navigate to="/dashboard" replace /> : <SignUpPage />} />
+          <Route path="/forgot-password" element={user ? <Navigate to="/dashboard" replace /> : <ForgotPasswordPage />} />
+          <Route path="/verify/:receiptRef" element={<VerifyReceiptPage />} />
+          <Route
+            path="/subscription"
+            element={<RequireAuth><SubscriptionPage /></RequireAuth>}
+          />
+          <Route
+            path="/subscription/callback"
+            element={<RequireAuth><SubscriptionCallbackPage /></RequireAuth>}
+          />
+
+          {/* Protected routes */}
+          <Route
+            path="/dashboard"
+            element={<RequireAppAccess><Dashboard /></RequireAppAccess>}
+          />
+          <Route
+            path="/dashboard/edit"
+            element={<RequireAppAccess><DashboardEditPage /></RequireAppAccess>}
+          />
+          <Route
+            path="/shops/create"
+            element={<RequireAppAccess><CreateShopPage /></RequireAppAccess>}
+          />
+          <Route
+            path="/sales/new"
+            element={<RequireAppAccess><NewSale /></RequireAppAccess>}
+          />
+          <Route
+            path="/sales/:id"
+            element={<RequireAppAccess><SaleDetailPage /></RequireAppAccess>}
+          />
+          <Route
+            path="/inventory"
+            element={<RequireAppAccess><InventoryList /></RequireAppAccess>}
+          />
+          <Route
+            path="/inventory/add"
+            element={<RequireAppAccess><AddProductPage /></RequireAppAccess>}
+          />
+          <Route
+            path="/inventory/:id/edit"
+            element={<RequireAppAccess><EditProductPage /></RequireAppAccess>}
+          />
+          <Route
+            path="/expenses"
+            element={<RequireAppAccess><ExpensesPage /></RequireAppAccess>}
+          />
+          <Route
+            path="/payments/callback"
+            element={<RequireAppAccess><PaymentCallbackPage /></RequireAppAccess>}
+          />
+          <Route
+            path="/sync-center"
+            element={<RequireAppAccess><SyncCenterPage /></RequireAppAccess>}
+          />
+
+          {/* Super-admin area — entire bundle loaded only when needed */}
+          <Route
+            path="/super-admin"
+            element={
+              <RequireSuperAdmin>
+                <SuperAdminLayout />
+              </RequireSuperAdmin>
+            }
+          >
+            <Route index element={<AdminOverviewPage />} />
+            <Route path="ai-intelligence" element={<AdminAiIntelligencePage />} />
+            <Route path="users" element={<AdminUsersPage />} />
+            <Route path="transactions" element={<AdminTransactionsPage />} />
+            <Route path="users/:id" element={<AdminUserDetailPage />} />
+            <Route path="shops" element={<AdminShopsPage />} />
+            <Route path="shops/:id" element={<AdminShopDetailPage />} />
+            <Route path="security" element={<AdminSecurityPage />} />
+            <Route path="monetization" element={<AdminMonetizationPage />} />
+            <Route path="audit-logs" element={<AdminAuditLogsPage />} />
+          </Route>
+
+          {/* Fallback */}
+          <Route path="*" element={<NotFoundPage />} />
+        </Routes>
+      </Suspense>
     </>
   );
 }

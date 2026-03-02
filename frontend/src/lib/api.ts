@@ -1,5 +1,6 @@
 import axios from 'axios';
 import toast from 'react-hot-toast';
+import { syncSwConfig } from '../offline/swConfig';
 
 /** Same host as the page, so phone at http://192.168.x.x:5173 calls API at http://192.168.x.x:3001/api */
 export function getApiBaseUrl(): string {
@@ -45,20 +46,29 @@ function wait(ms: number): Promise<void> {
 // ─── Request interceptor — attach token, shop ID, retry counter ───────────────
 api.interceptors.request.use(
   (config) => {
+    let authToken: string | null = null;
     if (!config.headers.Authorization) {
       try {
         const stored = localStorage.getItem(AUTH_STORAGE_KEY);
         if (stored) {
           const parsed = JSON.parse(stored) as { token?: string };
-          if (parsed.token) config.headers.Authorization = `Bearer ${parsed.token}`;
+          if (parsed.token) {
+            config.headers.Authorization = `Bearer ${parsed.token}`;
+            authToken = parsed.token;
+          }
         }
       } catch {
         // malformed storage — ignore
       }
+    } else {
+      const auth = String(config.headers.Authorization);
+      authToken = auth.startsWith('Bearer ') ? auth.slice(7) : null;
     }
     const shopId = localStorage.getItem('currentShopId');
     if (shopId) (config.headers as any)['x-shop-id'] = shopId;
     (config as any).__retryCount = (config as any).__retryCount ?? 0;
+    // Keep SW credentials fresh (non-blocking, writes only on change).
+    syncSwConfig(API_BASE_URL, authToken, shopId).catch(() => {});
     return config;
   },
   (error) => Promise.reject(error)
@@ -152,6 +162,14 @@ export const shopsApi = {
     api.post<{ success: boolean; data: { reset: boolean } }>('/shops/reset-dashboard-view', {}, {
       headers: { 'X-Dashboard-Edit-Token': dashboardEditToken },
     }),
+  getOwnerSummary: (params?: { startDate?: string; endDate?: string }) =>
+    api.get<{
+      success: boolean;
+      data: {
+        shops: Array<{ id: string; name: string; currency: string; totalSales: number; totalRevenue: number; totalProducts: number }>;
+        totals: { totalShops: number; totalRevenue: number; totalSales: number; totalProducts: number };
+      };
+    }>('/shops/owner-summary', { params }),
 };
 
 export const inventoryApi = {

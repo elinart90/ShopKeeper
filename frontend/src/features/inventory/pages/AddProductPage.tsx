@@ -16,6 +16,8 @@ import { Html5Qrcode } from 'html5-qrcode';
 import { inventoryApi } from '../../../lib/api';
 import { useShop } from '../../../contexts/useShop';
 import { decodeBarcodeFromImageFile } from '../../../lib/barcodeImageDecoder';
+import { enqueueOperation, processQueueOnce } from '../../../offline/offlineQueue';
+import { cacheProducts, getCachedProducts } from '../../../offline/inventoryCache';
 
 const UNITS = [
   { value: 'piece', label: 'Pcs' },
@@ -118,10 +120,18 @@ export default function AddProductPage() {
       setSearchResults([]);
       return;
     }
-    const t = setTimeout(() => {
-      inventoryApi.getProducts({ search: searchQuery }).then((r) => {
+    const t = setTimeout(async () => {
+      try {
+        const r = await inventoryApi.getProducts({ search: searchQuery });
         setSearchResults(r.data.data || []);
-      }).catch(() => setSearchResults([]));
+      } catch {
+        if (currentShop?.id) {
+          const cached = await getCachedProducts(currentShop.id, { search: searchQuery });
+          setSearchResults(cached);
+        } else {
+          setSearchResults([]);
+        }
+      }
     }, 300);
     return () => clearTimeout(t);
   }, [searchQuery]);
@@ -407,9 +417,37 @@ export default function AddProductPage() {
     };
     setSaving(true);
     try {
-      await inventoryApi.createProduct(payload);
+      // 1. Write to local cache immediately with a temp ID (optimistic).
+      const tempId = `offline-${Date.now()}`;
+      await cacheProducts(currentShop!.id, [{
+        id: tempId,
+        name: payload.name,
+        barcode: payload.barcode,
+        selling_price: Number(payload.selling_price || 0),
+        cost_price: Number(payload.cost_price || 0),
+        stock_quantity: Number((payload as any).stock_quantity || 0),
+        min_stock_level: Number(payload.min_stock_level || 0),
+        unit: payload.unit || 'piece',
+        is_active: true,
+      }]);
+
+      // 2. Enqueue the server write.
+      await enqueueOperation({
+        entity: 'inventory',
+        action: 'create',
+        method: 'post',
+        url: '/inventory/products',
+        payload,
+        shopId: currentShop!.id,
+        dedupeKey: `inventory:create:${payload.name}:${payload.barcode || tempId}`,
+      });
+
+      // 3. Navigate immediately — no waiting for a server round-trip.
       toast.success(withStock ? 'Product saved with initial stock' : 'Product saved');
       navigate('/inventory');
+
+      // 4. Kick off background sync — flushes queue immediately if online.
+      processQueueOnce().catch(() => {});
     } catch (err: any) {
       const msg = err?.response?.data?.error?.message || err?.response?.data?.message || err?.message || 'Failed to save';
       toast.error(msg);

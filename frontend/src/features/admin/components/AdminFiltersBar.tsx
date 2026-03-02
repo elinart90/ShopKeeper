@@ -6,28 +6,35 @@ type AdminFiltersBarProps = {
   onReset?: () => void;
 };
 
+const GLASS = {
+  background: 'rgba(17,24,39,0.75)',
+  border: '1px solid rgba(255,255,255,0.07)',
+  backdropFilter: 'blur(12px)',
+};
+
 export default function AdminFiltersBar({ children, onApply, onReset }: AdminFiltersBarProps) {
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-3 shadow-sm dark:border-gray-700 dark:bg-gray-800">
+    <div className="rounded-xl p-3" style={GLASS}>
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">{children}</div>
       {(onApply || onReset) && (
         <div className="mt-3 flex flex-wrap justify-end gap-2">
-          {onReset ? (
+          {onReset && (
             <button
               onClick={onReset}
-              className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
+              className="rounded-lg px-3 py-1.5 text-sm font-medium text-gray-400 transition-colors hover:text-white"
+              style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}
             >
               Reset
             </button>
-          ) : null}
-          {onApply ? (
+          )}
+          {onApply && (
             <button
               onClick={onApply}
-              className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm text-white hover:bg-emerald-700"
+              className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-emerald-500"
             >
               Apply
             </button>
-          ) : null}
+          )}
         </div>
       )}
     </div>

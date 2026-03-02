@@ -15,7 +15,7 @@ export default function CreateShopPage() {
     address: "",
     phone: "",
     email: "",
-    currency: "USD",
+    currency: "GHS",
   });
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
@@ -236,14 +236,14 @@ export default function CreateShopPage() {
                 onChange={handleChange}
                 className="w-full px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
               >
-                <option value="USD">USD</option>
-                <option value="EUR">EUR</option>
-                <option value="GBP">GBP</option>
-                <option value="NGN">NGN</option>
-                <option value="GHS">GHS</option>
-                <option value="KES">KES</option>
-                <option value="XAF">XAF</option>
-                <option value="ZAR">ZAR</option>
+                <option value="GHS">GHS — Ghanaian Cedi (GH₵)</option>
+                <option value="USD">USD — US Dollar ($)</option>
+                <option value="EUR">EUR — Euro (€)</option>
+                <option value="GBP">GBP — British Pound (£)</option>
+                <option value="NGN">NGN — Nigerian Naira (₦)</option>
+                <option value="KES">KES — Kenyan Shilling (KSh)</option>
+                <option value="XAF">XAF — Central African Franc</option>
+                <option value="ZAR">ZAR — South African Rand (R)</option>
               </select>
             </div>
 

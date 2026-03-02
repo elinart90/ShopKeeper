@@ -420,15 +420,18 @@ export class AuthService {
     );
   }
 
-  /** Request password reset: send 6-digit PIN to email. Always returns success (don't reveal if email exists). */
+  /** Request password reset: send 6-digit PIN to email. Always returns success (don't reveal if email exists).
+   *  Stores the PIN in the shared pin_verifications table (purpose='password_reset', shop_id=null)
+   *  — same table that Dashboard Edit uses, so no extra table creation is required.
+   */
   async forgotPasswordRequest(email: string) {
     const normalizedEmail = (email || '').toLowerCase().trim();
     if (!normalizedEmail) throw new Error('Email is required');
 
     const { data: user } = await supabase
       .from('users')
-      .select('id')
-      .eq('email', normalizedEmail)
+      .select('id, email')
+      .ilike('email', normalizedEmail)
       .maybeSingle();
 
     if (!user) {
@@ -437,23 +440,32 @@ export class AuthService {
 
     const pin = String(Math.floor(100000 + Math.random() * 900000));
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+    const PURPOSE = 'password_reset';
 
+    // Remove any existing password-reset PINs for this user.
     await supabase
-      .from('password_reset_pins')
+      .from('pin_verifications')
       .delete()
-      .eq('email', normalizedEmail);
+      .eq('user_id', user.id)
+      .eq('purpose', PURPOSE);
 
     const { error: insertErr } = await supabase
-      .from('password_reset_pins')
-      .insert({ email: normalizedEmail, pin, expires_at: expiresAt });
+      .from('pin_verifications')
+      .insert({
+        user_id: user.id,
+        shop_id: null,
+        pin,
+        purpose: PURPOSE,
+        expires_at: expiresAt,
+      });
 
     if (insertErr) {
       logger.error('Error saving password reset PIN:', insertErr);
       throw new Error('Failed to generate reset PIN');
     }
 
-    const sent = await sendPasswordResetPinEmail(normalizedEmail, pin);
-    if (!sent) logger.warn(`Password reset PIN email failed for ${normalizedEmail}`);
+    const sent = await sendPasswordResetPinEmail(user.email as string, pin);
+    if (!sent) logger.warn(`Password reset PIN email failed for ${user.email}`);
 
     return { message: 'If that email exists, a PIN was sent. Check your inbox (and spam folder).' };
   }
@@ -465,10 +477,19 @@ export class AuthService {
     const trimmedPin = (pin || '').trim();
     if (trimmedPin.length !== 6) throw new Error('PIN must be 6 digits');
 
-    const { data: row, error } = await supabase
-      .from('password_reset_pins')
+    const { data: user } = await supabase
+      .from('users')
       .select('id')
-      .eq('email', normalizedEmail)
+      .ilike('email', normalizedEmail)
+      .maybeSingle();
+
+    if (!user) throw new Error('Invalid or expired PIN');
+
+    const { data: row, error } = await supabase
+      .from('pin_verifications')
+      .select('id')
+      .eq('user_id', user.id)
+      .eq('purpose', 'password_reset')
       .eq('pin', trimmedPin)
       .gt('expires_at', new Date().toISOString())
       .maybeSingle();
@@ -485,10 +506,19 @@ export class AuthService {
     if (trimmedPin.length !== 6) throw new Error('PIN must be 6 digits');
     if (!newPassword || newPassword.length < 8) throw new Error('New password must be at least 8 characters');
 
-    const { data: row, error: findErr } = await supabase
-      .from('password_reset_pins')
+    const { data: user } = await supabase
+      .from('users')
       .select('id')
-      .eq('email', normalizedEmail)
+      .ilike('email', normalizedEmail)
+      .maybeSingle();
+
+    if (!user) throw new Error('Invalid or expired PIN');
+
+    const { data: row, error: findErr } = await supabase
+      .from('pin_verifications')
+      .select('id')
+      .eq('user_id', user.id)
+      .eq('purpose', 'password_reset')
       .eq('pin', trimmedPin)
       .gt('expires_at', new Date().toISOString())
       .maybeSingle();
@@ -496,25 +526,21 @@ export class AuthService {
     if (findErr || !row) throw new Error('Invalid or expired PIN');
 
     const passwordHash = await bcrypt.hash(newPassword, SALT_ROUNDS);
-    const { data: updatedRows, error: updateErr } = await supabase
+    const { error: updateErr } = await supabase
       .from('users')
       .update({
         password_hash: passwordHash,
         force_password_reset: false,
         updated_at: new Date().toISOString(),
       })
-      .ilike('email', normalizedEmail)
-      .select('id');
+      .eq('id', user.id);
 
     if (updateErr) {
       logger.error('Error updating password:', updateErr);
       throw new Error('Failed to reset password');
     }
-    if (!updatedRows || updatedRows.length === 0) {
-      throw new Error('No user account matched this email for password reset');
-    }
 
-    await supabase.from('password_reset_pins').delete().eq('id', row.id);
+    await supabase.from('pin_verifications').delete().eq('id', row.id);
     return { success: true };
   }
 }
