@@ -4,11 +4,17 @@ import { addNotification } from "./notificationsCache";
 
 let processingInFlight: Promise<{ processed: number }> | null = null;
 
+// Items that fail this many times are marked 'dead' and never retried automatically.
+const MAX_RETRIES = 5;
+
 function isNetworkError(error: any) {
   if (!error) return false;
   if (error.networkError) return true;
   const code = error.code;
   const msg = String(error.message || "").toLowerCase();
+  const status = error?.response?.status;
+  // 503 Service Unavailable = Supabase/auth transiently down → keep pending, retry later.
+  if (status === 503) return true;
   return code === "ERR_NETWORK" || code === "ECONNABORTED" || msg.includes("network") || msg.includes("timeout");
 }
 
@@ -48,12 +54,13 @@ export async function enqueueOperation(input: Omit<SyncQueueItem, "id" | "opId" 
 }
 
 export async function getQueueCounts() {
-  const [pending, failed, processing] = await Promise.all([
+  const [pending, failed, processing, dead] = await Promise.all([
     offlineDb.syncQueue.where("status").equals("pending").count(),
     offlineDb.syncQueue.where("status").equals("failed").count(),
     offlineDb.syncQueue.where("status").equals("processing").count(),
+    offlineDb.syncQueue.where("status").equals("dead").count(),
   ]);
-  return { pending, failed, processing, total: pending + failed + processing };
+  return { pending, failed, processing, dead, total: pending + failed + processing };
 }
 
 export async function processQueueOnce() {
@@ -68,6 +75,13 @@ export async function processQueueOnce() {
 
 async function processQueueInternal() {
   if (typeof navigator !== "undefined" && !navigator.onLine) return { processed: 0 };
+
+  // Recover items stuck in "processing" from a previous crashed/reloaded run.
+  // They were never completed, so reset them to "pending" so they get retried.
+  await offlineDb.syncQueue
+    .where("status")
+    .equals("processing")
+    .modify({ status: "pending", updatedAt: new Date().toISOString() });
 
   const queue = await offlineDb.syncQueue
     .where("status")
@@ -98,31 +112,34 @@ async function processQueueInternal() {
       const retries = (item.retries || 0) + 1;
       const statusCode = error?.response?.status;
       const message = error?.response?.data?.error?.message || error?.message || "Sync failed";
+      const transient = isNetworkError(error);
 
-      // Last-write-wins policy: for 409 conflicts, keep latest local operation and retry later.
-      // We mark as failed and preserve it for next sync cycles.
+      // After MAX_RETRIES non-transient failures the item is permanently broken.
+      // Mark it 'dead' so it is never retried automatically; the user can clear it manually.
+      const newStatus = transient ? "pending" : retries >= MAX_RETRIES ? "dead" : "failed";
+
       await offlineDb.syncQueue.update(item.id, {
-        status: isNetworkError(error) ? "pending" : "failed",
+        status: newStatus,
         retries,
         lastError: statusCode === 409 ? `Conflict (LWW): ${message}` : message,
         updatedAt: new Date().toISOString(),
       });
       emitQueueChanged();
 
-      // After 3 failed retries (non-network), surface a notification to the user.
-      if (!isNetworkError(error) && retries >= 3 && item.shopId) {
+      // Notify the user once when an item first becomes dead or fails ≥ 3 times.
+      if (!transient && (newStatus === "dead" || retries === 3) && item.shopId) {
         addNotification({
           notifId: `sync-error-${item.opId}`,
           type: "sync_error",
-          title: "Background Sync Failed",
+          title: newStatus === "dead" ? "Sync Permanently Failed" : "Background Sync Failed",
           message: `Could not sync ${item.entity} ${item.action}. ${message.slice(0, 80)}`,
           shopId: item.shopId,
           meta: { opId: item.opId, entity: item.entity, action: item.action },
         }).catch(() => {});
       }
 
-      if (isNetworkError(error)) {
-        break;
+      if (transient) {
+        break; // network is down — stop processing remaining items
       }
     }
   }
@@ -150,6 +167,11 @@ export async function removeQueueItem(id: number) {
 }
 
 export async function clearFailedQueueItems() {
-  await offlineDb.syncQueue.where("status").equals("failed").delete();
+  await offlineDb.syncQueue.where("status").anyOf("failed", "dead").delete();
+  emitQueueChanged();
+}
+
+export async function clearDeadQueueItems() {
+  await offlineDb.syncQueue.where("status").equals("dead").delete();
   emitQueueChanged();
 }

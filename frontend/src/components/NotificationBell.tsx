@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Bell, X, CheckCheck, Package, CreditCard, WifiOff, ShoppingCart, Wifi,
+  Bell, X, CheckCheck, Package, CreditCard, WifiOff, ShoppingCart,
 } from 'lucide-react';
 import type { AppNotification, NotifType } from '../offline/db';
 import { useNotifications } from '../hooks/useNotifications';

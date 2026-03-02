@@ -3,7 +3,7 @@ import { QUEUE_CHANGED_EVENT } from "../offline/db";
 import { getQueueCounts } from "../offline/offlineQueue";
 
 export function useSyncQueueCount() {
-  const [counts, setCounts] = useState({ pending: 0, failed: 0, processing: 0, total: 0 });
+  const [counts, setCounts] = useState({ pending: 0, failed: 0, processing: 0, dead: 0, total: 0 });
 
   useEffect(() => {
     let active = true;

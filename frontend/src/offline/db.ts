@@ -1,6 +1,6 @@
 import Dexie, { type Table } from "dexie";
 
-export type QueueStatus = "pending" | "processing" | "failed";
+export type QueueStatus = "pending" | "processing" | "failed" | "dead";
 
 export interface SyncQueueItem {
   id?: number;

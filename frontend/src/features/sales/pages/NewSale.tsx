@@ -21,7 +21,7 @@ import { inventoryApi, paymentsApi, customersApi } from '../../../lib/api';
 import { useShop } from '../../../contexts/useShop';
 import { useAuth } from '../../../contexts/useAuth';
 import { enqueueOperation, processQueueOnce } from '../../../offline/offlineQueue';
-import { getCachedProducts } from '../../../offline/inventoryCache';
+import { getCachedProducts, cacheProducts } from '../../../offline/inventoryCache';
 import { cacheCustomers, getCachedCustomers } from '../../../offline/dashboardCache';
 import { useOfflineStatus } from '../../../hooks/useOfflineStatus';
 import { useSyncQueueCount } from '../../../hooks/useSyncQueueCount';
@@ -117,7 +117,7 @@ export default function NewSale() {
   const [creditCustomerId, setCreditCustomerId] = useState<string | null>(null);
   const [creditCustomerDisplay, setCreditCustomerDisplay] = useState<string>('');
   const [customerSearch, setCustomerSearch] = useState('');
-  const [customerSearchResults, setCustomerSearchResults] = useState<Array<{ id: string; name: string; phone?: string; email?: string }>>([]);
+  const [customerSearchResults, setCustomerSearchResults] = useState<Array<{ id: string; name: string; phone?: string; email?: string; location?: string }>>([]);
   const [loadingCustomers, setLoadingCustomers] = useState(false);
   const [showNewCustomerForm, setShowNewCustomerForm] = useState(false);
   const [newCustomerName, setNewCustomerName] = useState('');
@@ -126,6 +126,18 @@ export default function NewSale() {
   const [receiptPromptSale, setReceiptPromptSale] = useState<any | null>(null);
   const [receiptPhoneInput, setReceiptPhoneInput] = useState('');
   const [receiptPrinting, setReceiptPrinting] = useState(false);
+
+  // Pre-warm the product cache when the POS loads while online,
+  // so the offline fallback works even if the user never visits the Inventory page.
+  useEffect(() => {
+    if (!currentShop || !navigator.onLine) return;
+    inventoryApi.getProducts({ limit: 500 })
+      .then((r) => {
+        const products = r.data.data || [];
+        if (products.length > 0) cacheProducts(currentShop.id, products);
+      })
+      .catch(() => {});
+  }, [currentShop?.id]);
 
   useEffect(() => {
     if (searchQuery) {
@@ -195,13 +207,32 @@ export default function NewSale() {
         search: searchQuery,
         search_mode: 'english_first',
       });
-      setProducts(response.data.data || []);
+      const results = response.data.data || [];
+      setProducts(results);
+      // Keep the cache fresh with every successful online search.
+      if (results.length > 0) cacheProducts(currentShop.id, results).catch(() => {});
     } catch (error: any) {
-      const isNetworkFail = !error?.response || error?.networkError || error?.code === 'ERR_NETWORK';
+      // Treat as a network failure when:
+      // - The device is offline (most reliable check)
+      // - Axios didn't receive any HTTP response (ERR_NETWORK, "Network Error", etc.)
+      // - Service worker returned a synthetic 503 (offline fallback response)
+      const isNetworkFail =
+        !navigator.onLine ||
+        !error?.response ||
+        error?.networkError ||
+        error?.code === 'ERR_NETWORK' ||
+        error?.code === 'ERR_INTERNET_DISCONNECTED' ||
+        (error?.message || '').toLowerCase().includes('network error') ||
+        (error?.message || '').toLowerCase().includes('failed to fetch') ||
+        error?.response?.status === 503 ||
+        error?.response?.status === 0;
+
       if (isNetworkFail) {
         const cached = await getCachedProducts(currentShop.id, { search: searchQuery });
         setProducts(cached);
-        if (cached.length === 0) toast('Offline – no cached results for this search');
+        if (cached.length === 0) {
+          toast('Offline – no cached results for "' + searchQuery + '"');
+        }
       } else {
         toast.error('Failed to search products');
         console.error(error);

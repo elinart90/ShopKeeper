@@ -33,7 +33,7 @@ import { useShop } from "../../../contexts/useShop";
 import { useAuth } from "../../../contexts/useAuth";
 import { useTheme } from "../../../contexts/ThemeContext";
 import { reportsApi, walletsApi, dailyCloseApi, shopsApi, salesApi, authApi, clearShopId, controlsApi } from "../../../lib/api";
-import { cacheDashboardStats, getCachedDashboardStats, cacheCustomers, getCachedCustomers } from "../../../offline/dashboardCache";
+import { cacheDashboardStats, getCachedDashboardStats } from "../../../offline/dashboardCache";
 import type {
   BusinessIntelligenceData,
   BusinessIntelligenceQueryData,
@@ -172,7 +172,7 @@ function ShopSwitcher({
   onAllStores?: () => void;
 }) {
   const [open, setOpen] = useState(false);
-  const otherShops = shops.filter((s) => s.id !== currentShop.id);
+
   const ownedShops = shops.filter((s) => s.role === "owner");
   const showAllStores = ownedShops.length > 1 && onAllStores;
 

@@ -7,7 +7,7 @@ import { useSyncQueueCount } from "../../../hooks/useSyncQueueCount";
 import { useSyncQueueItems } from "../../../hooks/useSyncQueueItems";
 import { clearFailedQueueItems, processQueueOnce, removeQueueItem, retryQueueItem } from "../../../offline/offlineQueue";
 
-type StatusFilter = "all" | "pending" | "processing" | "failed";
+type StatusFilter = "all" | "pending" | "processing" | "failed" | "dead";
 type EntityFilter = "all" | "sale" | "inventory";
 
 export default function SyncCenterPage() {
@@ -106,10 +106,11 @@ export default function SyncCenterPage() {
       </div>
 
       <div className="max-w-7xl mx-auto p-4 sm:p-6 space-y-4">
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
           <StatCard label="Pending" value={counts.pending} />
           <StatCard label="Failed" value={counts.failed} danger />
           <StatCard label="Processing" value={counts.processing} />
+          <StatCard label="Dead" value={counts.dead ?? 0} danger />
           <StatCard label="Total" value={counts.total} />
         </div>
 
@@ -130,6 +131,7 @@ export default function SyncCenterPage() {
               <option value="pending">Pending</option>
               <option value="processing">Processing</option>
               <option value="failed">Failed</option>
+              <option value="dead">Dead (won't retry)</option>
             </select>
             <select
               value={entityFilter}
@@ -183,7 +185,9 @@ export default function SyncCenterPage() {
                               ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300"
                               : item.status === "processing"
                                 ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300"
-                                : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300"
+                                : item.status === "dead"
+                                  ? "bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-400"
+                                  : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300"
                           }`}
                         >
                           {item.status}

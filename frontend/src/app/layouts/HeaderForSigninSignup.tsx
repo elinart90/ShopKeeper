@@ -1,5 +1,5 @@
 import { useContext, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Menu, X } from "lucide-react";
 import { useAuth } from "../../contexts/useAuth";
 import { useOfflineStatus } from "../../hooks/useOfflineStatus";
@@ -9,6 +9,7 @@ import NotificationBell from "../../components/NotificationBell";
 
 export default function Header() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const userDisplay = user?.name || user?.email || "Welcome!";
   const { online } = useOfflineStatus();
@@ -73,9 +74,14 @@ export default function Header() {
                 {online ? "Online" : "Offline"}
               </span>
               {queue.total > 0 && (
-                <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
+                <button
+                  type="button"
+                  onClick={() => navigate("/sync-center")}
+                  title="Click to view & manage pending syncs"
+                  className="px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-800/50 transition-colors cursor-pointer"
+                >
                   {queue.total} pending sync
-                </span>
+                </button>
               )}
               <NotificationBell shopId={shopId} />
               <Link to="/dashboard" className="px-4 py-2 btn-primary-gradient">
@@ -146,9 +152,13 @@ export default function Header() {
                 {online ? "Online" : "Offline"}
               </span>
               {queue.total > 0 && (
-                <span className="px-2 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
+                <button
+                  type="button"
+                  onClick={() => navigate("/sync-center")}
+                  className="px-2 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300"
+                >
                   {queue.total} pending
-                </span>
+                </button>
               )}
             </div>
             <div className="mb-2 px-2">
