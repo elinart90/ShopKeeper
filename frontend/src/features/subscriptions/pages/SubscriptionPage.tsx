@@ -12,7 +12,7 @@ export default function SubscriptionPage() {
   const { user, logout } = useAuth();
   const [plans, setPlans] = useState<SubscriptionPlan[]>([]);
   const [status, setStatus] = useState<SubscriptionStatus | null>(null);
-  const [billingCycle, setBillingCycle] = useState<'monthly' | 'yearly'>('monthly');
+  const billingCycle = 'yearly' as const;
   const [loading, setLoading] = useState(true);
   const [payingPlan, setPayingPlan] = useState<SubscriptionPlan['code'] | null>(null);
 
@@ -106,30 +106,9 @@ export default function SubscriptionPage() {
           <p className="text-gray-600 dark:text-gray-400 mt-2">
             An active subscription is required to use ShoopKeeper.
           </p>
-          <div className="mt-4 inline-flex rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
-            <button
-              type="button"
-              onClick={() => setBillingCycle('monthly')}
-              className={`px-4 py-2 text-sm font-medium ${
-                billingCycle === 'monthly'
-                  ? 'bg-emerald-600 text-white'
-                  : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300'
-              }`}
-            >
-              Monthly
-            </button>
-            <button
-              type="button"
-              onClick={() => setBillingCycle('yearly')}
-              className={`px-4 py-2 text-sm font-medium ${
-                billingCycle === 'yearly'
-                  ? 'bg-emerald-600 text-white'
-                  : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300'
-              }`}
-            >
-              Yearly (15% off)
-            </button>
-          </div>
+          <p className="mt-3 inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 text-sm font-medium">
+            Yearly billing — 15% savings included
+          </p>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
@@ -139,13 +118,10 @@ export default function SubscriptionPage() {
               <div key={plan.code} className="bg-white dark:bg-gray-800 rounded-xl shadow p-5 border border-gray-200 dark:border-gray-700">
                 <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{plan.name}</h2>
                 <p className="text-3xl font-bold text-emerald-600 dark:text-emerald-400 mt-3">
-                  {plan.currency} {(billingCycle === 'yearly' ? plan.yearlyAmount : plan.monthlyAmount).toFixed(2)}
+                  {plan.currency} {plan.yearlyAmount.toFixed(2)}
                 </p>
-                <p className="text-sm text-gray-500 dark:text-gray-400">
-                  {billingCycle === 'yearly' ? 'per year' : 'per month'}
-                </p>
-                <p className="text-xs text-emerald-600 dark:text-emerald-400 mb-5">
-                  Full year: {plan.currency} {plan.yearlyAmount.toFixed(2)} ({plan.yearlyDiscountPercent}% off)
+                <p className="text-sm text-gray-500 dark:text-gray-400 mb-5">
+                  per year · {plan.currency} {(plan.yearlyAmount / 12).toFixed(2)}/mo
                 </p>
                 <button
                   type="button"
