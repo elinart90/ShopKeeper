@@ -189,7 +189,20 @@ export function buildWhatsAppReceiptMessage(args: {
 }
 
 export function buildWhatsAppLink(phone: string, message: string) {
-  return `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
+  const normalizedPhone = String(phone || '').replace(/\D/g, '');
+  const encodedText = encodeURIComponent(message);
+
+  // On phones, deep-link directly into WhatsApp app chat for better "open chat" behavior.
+  if (typeof navigator !== 'undefined') {
+    const ua = navigator.userAgent || '';
+    const isMobile = /Android|iPhone|iPad|iPod/i.test(ua);
+    if (isMobile) {
+      return `whatsapp://send?phone=${normalizedPhone}&text=${encodedText}`;
+    }
+  }
+
+  // Desktop / fallback web chat
+  return `https://api.whatsapp.com/send?phone=${encodeURIComponent(normalizedPhone)}&text=${encodedText}`;
 }
 
 export async function createReceiptPdfFile(args: {

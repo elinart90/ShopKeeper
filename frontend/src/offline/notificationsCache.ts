@@ -3,14 +3,16 @@ import { offlineDb, type AppNotification, type NotifType } from './db';
 export async function addNotification(
   notif: Omit<AppNotification, 'id' | 'read' | 'createdAt'>,
 ): Promise<void> {
-  if (notif.notifId) {
-    const existing = await offlineDb.notifications.where('notifId').equals(notif.notifId).count();
-    if (existing > 0) return;
-  }
-  await offlineDb.notifications.add({
-    ...notif,
-    read: false,
-    createdAt: new Date().toISOString(),
+  await offlineDb.transaction('rw', offlineDb.notifications, async () => {
+    if (notif.notifId) {
+      const existing = await offlineDb.notifications.where('notifId').equals(notif.notifId).count();
+      if (existing > 0) return;
+    }
+    await offlineDb.notifications.add({
+      ...notif,
+      read: false,
+      createdAt: new Date().toISOString(),
+    });
   });
 }
 

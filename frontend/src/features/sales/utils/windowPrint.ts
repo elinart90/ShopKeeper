@@ -49,23 +49,40 @@ function row(label: string, value: string): string {
   return `<div class="info-row"><span class="label">${label}</span><span class="value">${value}</span></div>`;
 }
 
+function withAutoPrintScript(html: string): string {
+  const script = [
+    "<script>",
+    "(function(){",
+    "  function runPrint(){",
+    "    try { window.focus(); window.print(); } catch (e) {}",
+    "  }",
+    "  if (document.readyState === 'complete') setTimeout(runPrint, 180);",
+    "  else window.addEventListener('load', function(){ setTimeout(runPrint, 180); }, { once: true });",
+    "})();",
+    "</script>",
+  ].join("");
+  return html.replace("</body>", `${script}</body>`);
+}
+
 function buildReceiptHtml(p: ReceiptPrintPayload): string {
   const { sale, shopName, shopAddress, shopPhone, shopEmail, cashierName, currency } = p;
   const saleDate = sale?.created_at ? new Date(sale.created_at) : new Date();
   const paymentLabel = String(sale?.payment_method || "cash").replace(/_/g, " ");
+  const paymentDisplay = paymentLabel.toUpperCase();
   const items = Array.isArray(sale?.items) ? sale.items : [];
   const discount = Number(sale?.discount_amount || 0);
   const total = Number(sale?.final_amount || 0);
 
-  // 2-column item rows: "Name x Qty" | "Total"
+  // 2-column item rows: "Name + qty x unit" | "Total"
   const itemRows = items.length
     ? items.map((item) => {
         const qty = Number(item?.quantity || 0);
+        const unitPrice = Number(item?.unit_price || 0);
         const lineTotal = Number(item?.total_price || 0);
         const name = esc(item?.product?.name || "Product");
-        return `<div class="item-row"><span class="item-name">${name} x${qty}</span><span class="item-total">${fmt(lineTotal, currency)}</span></div>`;
+        return `<div class="item-row"><span class="item-main"><span class="item-name">${name}</span><span class="item-meta">${qty} x ${fmt(unitPrice, currency)}</span></span><span class="item-total">${fmt(lineTotal, currency)}</span></div>`;
       }).join("")
-    : `<div class="item-row"><span class="item-name muted">No items</span></div>`;
+    : `<div class="item-row"><span class="item-main"><span class="item-name muted">No items</span></span></div>`;
 
   const discountLine = discount > 0
     ? `<div class="summary-row"><span>Discount</span><span class="red">-${fmt(discount, currency)}</span></div>`
@@ -80,39 +97,44 @@ function buildReceiptHtml(p: ReceiptPrintPayload): string {
     : "";
 
   const css = [
-    "@page { size: 58mm auto; margin: 2mm 2mm; }",
+    "@page { size: 58mm auto; margin: 0; }",
     "* { box-sizing:border-box; margin:0; padding:0; }",
-    "body { font-family:'Courier New',Courier,monospace; font-size:10.5px; color:#000; background:#fff; width:54mm; }",
-    ".receipt { width:100%; }",
+    "html, body { background:#fff !important; color:#000 !important; width:58mm !important; height:auto !important; min-height:0 !important; overflow:hidden !important; }",
+    "body { font-family:'Courier New',Courier,monospace; font-size:11px; line-height:1.3; width:58mm; padding:2mm; text-rendering:optimizeLegibility; -webkit-font-smoothing:none; font-smooth:never; display:inline-block; }",
+    ".receipt { width:100%; color:#000; display:block; }",
     // Header — centered
     ".header { text-align:center; margin-bottom:4px; }",
-    ".shop-name { font-size:13px; font-weight:bold; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:2px; }",
-    ".header p { font-size:9.5px; color:#333; line-height:1.5; }",
+    ".shop-name { font-size:14px; font-weight:800; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:2px; color:#000; }",
+    ".header p { font-size:10.5px; color:#000; line-height:1.35; }",
     // Divider
-    ".div { border-top:1px dashed #555; margin:4px 0; }",
-    ".div-solid { border-top:1px solid #000; margin:4px 0; }",
+    ".div { border-top:1px dashed #000; margin:4px 0; }",
+    ".div-solid { border-top:1.2px solid #000; margin:4px 0; }",
     // Sale info rows
-    ".info-row { display:flex; justify-content:space-between; margin:1.5px 0; font-size:10px; }",
-    ".info-row .label { color:#333; white-space:nowrap; margin-right:4px; }",
-    ".info-row .value { text-align:right; font-weight:bold; word-break:break-all; }",
-    ".ref { font-size:9px; color:#555; margin-top:2px; }",
+    ".info-row { display:flex; justify-content:space-between; margin:1.5px 0; font-size:10.5px; }",
+    ".info-row .label { color:#000; white-space:nowrap; margin-right:4px; }",
+    ".info-row .value { text-align:right; font-weight:700; word-break:break-all; color:#000; }",
+    ".payment-row .label { font-weight:800; }",
+    ".payment-row .value { font-size:11.5px; font-weight:800; letter-spacing:0.2px; }",
+    ".ref { font-size:10px; color:#000; margin-top:2px; }",
     // Item column header
-    ".item-header { display:flex; justify-content:space-between; font-size:9.5px; font-weight:bold; border-bottom:1px solid #000; padding-bottom:2px; margin-bottom:2px; }",
+    ".item-header { display:flex; justify-content:space-between; font-size:10.5px; font-weight:800; border-bottom:1px solid #000; padding-bottom:2px; margin-bottom:2px; color:#000; }",
     // Item rows
-    ".item-row { display:flex; justify-content:space-between; align-items:baseline; padding:2px 0; border-bottom:1px dashed #ccc; font-size:10px; }",
-    ".item-name { flex:1; margin-right:4px; word-break:break-word; }",
-    ".item-total { white-space:nowrap; font-weight:bold; }",
+    ".item-row { display:flex; justify-content:space-between; align-items:flex-start; gap:4px; padding:2px 0; border-bottom:1px dashed #000; font-size:10.5px; }",
+    ".item-main { flex:1; min-width:0; display:flex; flex-direction:column; }",
+    ".item-name { font-weight:700; margin-right:4px; word-break:break-word; }",
+    ".item-meta { font-size:9.5px; color:#111; margin-top:1px; }",
+    ".item-total { white-space:nowrap; font-weight:700; color:#000; }",
     // Summary rows
-    ".summary-row { display:flex; justify-content:space-between; font-size:10px; padding:1.5px 0; }",
+    ".summary-row { display:flex; justify-content:space-between; font-size:10.5px; padding:1.5px 0; color:#000; }",
     ".red { color:#c00; }",
-    ".muted { color:#666; }",
+    ".muted { color:#000; }",
     // Grand total
-    ".total-row { display:flex; justify-content:space-between; align-items:baseline; border-top:1px solid #000; border-bottom:1px solid #000; padding:3px 0; margin:3px 0; }",
-    ".total-label { font-size:12px; font-weight:bold; }",
-    ".total-amount { font-size:13px; font-weight:bold; }",
+    ".total-row { display:flex; justify-content:space-between; align-items:baseline; border-top:1.3px solid #000; border-bottom:1.3px solid #000; padding:3px 0; margin:3px 0; color:#000; }",
+    ".total-label { font-size:12.5px; font-weight:800; }",
+    ".total-amount { font-size:14px; font-weight:800; }",
     // Footer
-    ".footer { text-align:center; font-size:9.5px; color:#444; margin-top:6px; line-height:1.6; }",
-    "@media print { html,body { margin:0; padding:0; } }",
+    ".footer { text-align:center; font-size:10px; color:#000; margin-top:6px; line-height:1.45; }",
+    "@media print { html,body { margin:0 !important; padding:0 !important; width:58mm !important; height:auto !important; min-height:0 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; } body { overflow:hidden !important; display:inline-block !important; } }",
   ].join(" ");
 
   const parts: string[] = [
@@ -133,7 +155,7 @@ function buildReceiptHtml(p: ReceiptPrintPayload): string {
     // === SALE INFO ===
     sale?.sale_number ? row("Receipt #", esc(sale.sale_number)) : "",
     row("Date", saleDate.toLocaleDateString() + " " + saleDate.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })),
-    row("Payment", esc(paymentLabel)),
+    `<div class="info-row payment-row"><span class="label">Payment</span><span class="value">${esc(paymentDisplay)}</span></div>`,
     cashierName ? row("Cashier", esc(cashierName)) : "",
     customerLine,
     refLine,
@@ -141,7 +163,7 @@ function buildReceiptHtml(p: ReceiptPrintPayload): string {
     "<div class='div'></div>",
 
     // === ITEMS ===
-    "<div class='item-header'><span>ITEM</span><span>TOTAL</span></div>",
+    "<div class='item-header'><span>ITEM (QTY x UNIT)</span><span>TOTAL</span></div>",
     itemRows,
 
     "<div class='div'></div>",
@@ -180,7 +202,19 @@ function isMobileDevice(): boolean {
  * The user can then tap the browser's Share / Print button from there.
  */
 function printReceiptMobile(html: string): void {
-  const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+  const printableHtml = withAutoPrintScript(html);
+
+  // Preferred: open a transient window and print immediately.
+  const win = window.open("", "_blank");
+  if (win) {
+    win.document.open();
+    win.document.write(printableHtml);
+    win.document.close();
+    return;
+  }
+
+  // Fallback: Blob URL (some browsers block about:blank popup writing).
+  const blob = new Blob([printableHtml], { type: "text/html;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const opened = window.open(url, "_blank");
   // If popup was blocked, fall back to navigating in the same tab
@@ -216,13 +250,16 @@ function printReceiptDesktop(html: string): void {
     return;
   }
   win.document.open();
-  win.document.write(html);
+  win.document.write(withAutoPrintScript(html));
   win.document.close();
-  win.focus();
+
+  // Close after actual print when supported; fallback close after delay.
+  win.onafterprint = () => {
+    try { win.close(); } catch {}
+  };
   setTimeout(() => {
-    win.print();
-    win.close();
-  }, 300);
+    try { if (!win.closed) win.close(); } catch {}
+  }, 30_000);
 }
 
 /**

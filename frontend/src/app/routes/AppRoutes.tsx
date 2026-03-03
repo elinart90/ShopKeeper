@@ -175,6 +175,51 @@ function RequireAppAccess({ children }: { children: ReactElement }) {
   );
 }
 
+function AuthenticatedHomeRedirect() {
+  const { user } = useAuth();
+  const [checking, setChecking] = useState(true);
+  const [targetPath, setTargetPath] = useState("/dashboard");
+
+  useEffect(() => {
+    let active = true;
+
+    if (!user) {
+      setChecking(false);
+      setTargetPath("/dashboard");
+      return;
+    }
+
+    setChecking(true);
+    authApi
+      .getPlatformAdminStatus()
+      .then((res) => {
+        if (!active) return;
+        setTargetPath(res.data?.data?.isPlatformAdmin ? "/super-admin" : "/dashboard");
+      })
+      .catch(() => {
+        if (!active) return;
+        setTargetPath("/dashboard");
+      })
+      .finally(() => {
+        if (active) setChecking(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [user?.id]);
+
+  if (checking) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="h-6 w-6 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  return <Navigate to={targetPath} replace />;
+}
+
 export default function AppRoutes() {
   const { user } = useAuth();
 
@@ -192,11 +237,11 @@ export default function AppRoutes() {
           {/* Public routes */}
           <Route
             path="/"
-            element={user ? <Navigate to="/dashboard" replace /> : <Welcome />}
+            element={user ? <AuthenticatedHomeRedirect /> : <Welcome />}
           />
-          <Route path="/sign-in" element={user ? <Navigate to="/dashboard" replace /> : <SignInPage />} />
-          <Route path="/sign-up" element={user ? <Navigate to="/dashboard" replace /> : <SignUpPage />} />
-          <Route path="/forgot-password" element={user ? <Navigate to="/dashboard" replace /> : <ForgotPasswordPage />} />
+          <Route path="/sign-in" element={user ? <AuthenticatedHomeRedirect /> : <SignInPage />} />
+          <Route path="/sign-up" element={user ? <AuthenticatedHomeRedirect /> : <SignUpPage />} />
+          <Route path="/forgot-password" element={user ? <AuthenticatedHomeRedirect /> : <ForgotPasswordPage />} />
           <Route path="/verify/:receiptRef" element={<VerifyReceiptPage />} />
           <Route
             path="/subscription"

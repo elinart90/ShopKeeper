@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { ArrowLeft, Mail, Eye, EyeOff, Lock } from "lucide-react";
 import { useAuth } from "../../../contexts/useAuth";
+import { authApi } from "../../../lib/api";
 import toast from "react-hot-toast";
 
 export default function SignInPage() {
@@ -24,7 +25,18 @@ export default function SignInPage() {
     try {
       await login({ email: formData.email, password: formData.password });
       toast.success("Signed in successfully");
-      navigate("/dashboard", { replace: true });
+
+      let targetPath = "/dashboard";
+      try {
+        const adminStatus = await authApi.getPlatformAdminStatus();
+        if (adminStatus.data?.data?.isPlatformAdmin) {
+          targetPath = "/super-admin";
+        }
+      } catch {
+        // Fall back to regular dashboard when admin status check fails.
+      }
+
+      navigate(targetPath, { replace: true });
     } catch (err: unknown) {
       if (err instanceof Error) {
         setError(err.message);

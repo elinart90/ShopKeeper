@@ -1,4 +1,4 @@
-import { useContext, useState } from "react";
+import { useContext, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Menu, X } from "lucide-react";
 import { useAuth } from "../../contexts/useAuth";
@@ -16,8 +16,10 @@ export default function Header() {
   const queue = useSyncQueueCount();
   const shopCtx = useContext(ShopContext);
   const shopId = shopCtx?.currentShop?.id;
+  const currentShopRole = String(shopCtx?.currentShop?.role || "").toLowerCase();
+  const isOwner = currentShopRole === "owner";
 
-  const mobileDashboardLinks = [
+  const ownerMobileDashboardLinks = [
     { label: "Dashboard", to: "/dashboard?tab=overview" },
     { label: "New Sale", to: "/sales/new" },
     { label: "Inventory", to: "/inventory" },
@@ -31,11 +33,36 @@ export default function Header() {
     { label: "Settings", to: "/dashboard?tab=settings" },
   ];
 
+  const nonOwnerMobileDashboardLinks = [
+    { label: "Dashboard", to: "/dashboard?tab=overview" },
+    { label: "New Sale", to: "/sales/new" },
+    { label: "Inventory", to: "/inventory" },
+    { label: "Credit & Risk", to: "/dashboard?tab=credit" },
+    { label: "Settings", to: "/dashboard?tab=settings" },
+  ];
+
+  const mobileDashboardLinks = isOwner ? ownerMobileDashboardLinks : nonOwnerMobileDashboardLinks;
+
   const closeMobileMenu = () => setMobileMenuOpen(false);
 
   const closeAllMenus = () => {
     setMobileMenuOpen(false);
   };
+
+  useEffect(() => {
+    if (!(user && mobileMenuOpen)) return;
+
+    const prevBodyOverflow = document.body.style.overflow;
+    const prevHtmlOverflow = document.documentElement.style.overflow;
+
+    document.body.style.overflow = "hidden";
+    document.documentElement.style.overflow = "hidden";
+
+    return () => {
+      document.body.style.overflow = prevBodyOverflow;
+      document.documentElement.style.overflow = prevHtmlOverflow;
+    };
+  }, [user, mobileMenuOpen]);
 
   return (
     <header className="bg-white dark:bg-gray-800 shadow-sm border-b border-gray-200 dark:border-gray-700 sticky top-0 z-50">

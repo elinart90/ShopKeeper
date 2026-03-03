@@ -28,11 +28,9 @@ import { useSyncQueueCount } from '../../../hooks/useSyncQueueCount';
 import { decodeBarcodeFromImageFile, PRODUCT_BARCODE_FORMATS } from '../../../lib/barcodeImageDecoder';
 import {
   buildWhatsAppLink,
-  buildWhatsAppReceiptMessage,
   createReceiptPdfFile,
   normalizePhoneForWhatsApp,
   triggerBlobDownload,
-  trySharePdfFile,
 } from '../utils/receiptShare';
 import { printReceipt } from '../utils/windowPrint';
 
@@ -788,7 +786,7 @@ export default function NewSale() {
     }
 
     try {
-      const { blob, file, filename } = await createReceiptPdfFile({
+      const { blob, filename } = await createReceiptPdfFile({
         sale: receiptPromptSale,
         shopName: currentShop?.name || 'ShopKeeper',
         shopAddress: currentShop?.address,
@@ -798,30 +796,16 @@ export default function NewSale() {
         currency: currentShop?.currency || 'GHS',
       });
 
-      const shared = await trySharePdfFile(
-        file,
-        `Receipt ${receiptPromptSale?.sale_number || ''}`,
-        'Sales receipt'
-      );
-      if (shared) {
-        toast.success('Receipt shared successfully.');
-        handleSkipReceipt();
-        return;
-      }
-
-      // Fallback for browsers that cannot share files directly.
+      // Always open direct chat for the typed number.
+      // PDF is downloaded first so user can attach it immediately in the opened chat.
       triggerBlobDownload(blob, filename);
-      const message = buildWhatsAppReceiptMessage({
-        sale: receiptPromptSale,
-        shopName: currentShop?.name || 'ShopKeeper',
-        currency: currentShop?.currency || 'GHS',
-      });
+      const message = `Hello, please find your receipt attached as a PDF from ${currentShop?.name || 'ShopKeeper'}.`;
       const waUrl = buildWhatsAppLink(normalizedPhone, message);
       const opened = window.open(waUrl, '_blank');
       if (!opened) {
         window.location.href = waUrl;
       }
-      toast.success('PDF downloaded. Attach it in WhatsApp and send.');
+      toast.success('Direct WhatsApp chat opened. Attach the downloaded PDF and send.');
       handleSkipReceipt();
     } catch (error) {
       console.error(error);

@@ -7,7 +7,18 @@ export function useNotifications(shopId: string | undefined) {
     async () => {
       if (!shopId) return [];
       const all = await offlineDb.notifications.where('shopId').equals(shopId).toArray();
-      return all.sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 80);
+      // Guard against accidental duplicate notifId rows from previous builds/races.
+      // Keep the newest row per notifId so UI keys remain unique and stable.
+      const deduped = new Map<string, (typeof all)[number]>();
+      for (const n of all) {
+        const existing = deduped.get(n.notifId);
+        if (!existing || String(n.createdAt).localeCompare(String(existing.createdAt)) > 0) {
+          deduped.set(n.notifId, n);
+        }
+      }
+      return Array.from(deduped.values())
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+        .slice(0, 80);
     },
     [shopId],
     [],

@@ -8,11 +8,9 @@ import { useShop } from '../../../contexts/useShop';
 import { useAuth } from '../../../contexts/useAuth';
 import {
   buildWhatsAppLink,
-  buildWhatsAppReceiptMessage,
   createReceiptPdfFile,
   normalizePhoneForWhatsApp,
   triggerBlobDownload,
-  trySharePdfFile,
 } from '../utils/receiptShare';
 import { printReceipt } from '../utils/windowPrint';
 
@@ -71,7 +69,7 @@ export default function SaleDetailPage() {
     }
 
     try {
-      const { blob, file, filename } = await createReceiptPdfFile({
+      const { blob, filename } = await createReceiptPdfFile({
         sale,
         shopName: currentShop?.name || 'ShopKeeper',
         shopAddress: currentShop?.address,
@@ -80,24 +78,17 @@ export default function SaleDetailPage() {
         cashierName: user?.name || user?.email || 'Cashier',
         currency,
       });
-      const shared = await trySharePdfFile(file, `Receipt ${sale?.sale_number || ''}`, 'Sales receipt');
-      if (shared) {
-        toast.success('Receipt shared successfully.');
-        return;
-      }
 
+      // Always open direct chat for the typed number.
+      // PDF is downloaded first so user can attach it immediately in the opened chat.
       triggerBlobDownload(blob, filename);
-      const message = buildWhatsAppReceiptMessage({
-        sale,
-        shopName: currentShop?.name || 'ShopKeeper',
-        currency,
-      });
+      const message = `Hello, please find your receipt attached as a PDF from ${currentShop?.name || 'ShopKeeper'}.`;
       const waUrl = buildWhatsAppLink(normalizedPhone, message);
       const opened = window.open(waUrl, '_blank');
       if (!opened) {
         window.location.href = waUrl;
       }
-      toast.success('PDF downloaded. Attach it in WhatsApp and send.');
+      toast.success('Direct WhatsApp chat opened. Attach the downloaded PDF and send.');
     } catch (error) {
       console.error(error);
       toast.error('Failed to prepare receipt PDF.');

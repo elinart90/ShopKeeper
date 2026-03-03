@@ -236,7 +236,7 @@ export default function NotificationBell({ shopId }: { shopId: string | undefine
                 ) : (
                   notifications.map(notif => (
                     <NotifItem
-                      key={notif.notifId}
+                      key={`${notif.notifId}-${String(notif.id ?? notif.createdAt)}`}
                       notif={notif}
                       onRead={() => markRead(notif.notifId)}
                       onDismiss={() => dismiss(notif.notifId)}

@@ -152,8 +152,20 @@ export default function Welcome() {
                 </div>
             </div>
 
-            {/* Trust badge - positioned absolutely within the colored section */}
-            
+            {/* Trust badge - keep it in normal flow to avoid overlap */}
+            <div className="mt-4 flex justify-center">
+              <div className="relative">
+                <div className="absolute -inset-2 bg-gradient-to-r from-yellow-400 to-orange-500 rounded-full opacity-70 blur-md"></div>
+                <div className="relative h-16 w-16 sm:h-20 sm:w-20 flex items-center justify-center rounded-full bg-gradient-to-br from-yellow-400 to-orange-500 shadow-xl border-4 border-white">
+                  <div className="relative flex flex-col items-center justify-center text-white p-1">
+                    <ShieldCheck className="h-5 w-5 sm:h-6 sm:w-6" />
+                    <span className="mt-0.5 text-[9px] sm:text-[10px] font-bold tracking-wide">
+                      TRUSTED
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -173,22 +185,6 @@ export default function Welcome() {
         </div>
         
       </div>
-              <div className="absolute bottom-105 left-1/2 transform -translate-x-1/2">
-              <div className="relative">
-                {/* Outer glow */}
-                <div className="absolute -inset-2 bg-gradient-to-r from-yellow-400 to-orange-500 rounded-full opacity-70 blur-md"></div>
-                
-                {/* Main badge */}
-                <div className="relative h-24 w-34 sm:h-28 sm:w-28 flex items-center justify-center rounded-full bg-gradient-to-br from-yellow-400 to-orange-500 shadow-xl border-10 border-white">
-                  <div className="relative flex flex-col items-center justify-center text-white p-2">
-                    <ShieldCheck className="h-8 w-8 sm:h-10 sm:w-10" />
-                    <span className="mt-1 text-xs sm:text-sm font-bold tracking-wide">
-                      TRUSTED
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </div>
       {/* Content area - fixed height, no scroll */}
       <div className="h-2/3 sm:h-3/5 pt-10 sm:pt-12">
         <div className="h-full flex flex-col max-w-md mx-auto px-4 sm:px-6">
