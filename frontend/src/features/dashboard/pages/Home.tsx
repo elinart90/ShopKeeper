@@ -1113,7 +1113,7 @@ function MoneyFlowTab({
   const [adjustModal, setAdjustModal] = useState<{ wallet: any; type: "inflow" | "outflow" } | null>(null);
   const [transferModal, setTransferModal] = useState(false);
   const [closeModal, setCloseModal] = useState(false);
-  const [closeForm, setCloseForm] = useState({ expected_cash: 0, actual_cash: 0, notes: "" });
+  const [closeForm, setCloseForm] = useState({ expected_cash: "", actual_cash: "", notes: "" });
   const [adjustForm, setAdjustForm] = useState({ amount: 0, description: "" });
   const [transferForm, setTransferForm] = useState({ from_wallet_id: "", to_wallet_id: "", amount: 0 });
   const isOwner = currentShop?.role === "owner";
@@ -1183,15 +1183,31 @@ function MoneyFlowTab({
   };
 
   const handleCreateClose = async () => {
+    const expectedRaw = String(closeForm.expected_cash ?? "").trim();
+    const actualRaw = String(closeForm.actual_cash ?? "").trim();
+    const notes = String(closeForm.notes ?? "").trim();
+
+    if (!expectedRaw || !actualRaw) {
+      toast.error("Enter both expected cash and actual cash.");
+      return;
+    }
+
+    const expected = Number(expectedRaw);
+    const actual = Number(actualRaw);
+    if (!Number.isFinite(expected) || !Number.isFinite(actual) || expected < 0 || actual < 0) {
+      toast.error("Enter valid non-negative amounts.");
+      return;
+    }
+
     try {
       await dailyCloseApi.create({
-        expected_cash: closeForm.expected_cash,
-        actual_cash: closeForm.actual_cash,
-        notes: closeForm.notes || undefined,
+        expected_cash: expected,
+        actual_cash: actual,
+        notes: notes || undefined,
       });
       toast.success("Daily close recorded");
       setCloseModal(false);
-      setCloseForm({ expected_cash: 0, actual_cash: 0, notes: "" });
+      setCloseForm({ expected_cash: "", actual_cash: "", notes: "" });
       loadData();
     } catch (e: any) {
       toast.error(e?.response?.data?.error?.message || "Failed");
@@ -1456,16 +1472,16 @@ function MoneyFlowTab({
             <input
               type="number"
               placeholder="Expected cash"
-              value={closeForm.expected_cash || ""}
-              onChange={(e) => setCloseForm((f) => ({ ...f, expected_cash: parseFloat(e.target.value) || 0 }))}
+              value={closeForm.expected_cash}
+              onChange={(e) => setCloseForm((f) => ({ ...f, expected_cash: e.target.value }))}
               className="w-full px-4 py-2 border rounded-lg mb-3"
               min="0"
             />
             <input
               type="number"
               placeholder="Actual cash counted"
-              value={closeForm.actual_cash || ""}
-              onChange={(e) => setCloseForm((f) => ({ ...f, actual_cash: parseFloat(e.target.value) || 0 }))}
+              value={closeForm.actual_cash}
+              onChange={(e) => setCloseForm((f) => ({ ...f, actual_cash: e.target.value }))}
               className="w-full px-4 py-2 border rounded-lg mb-3"
               min="0"
             />
