@@ -68,6 +68,7 @@ export declare const customerSchema: z.ZodObject<{
     phone: z.ZodOptional<z.ZodString>;
     email: z.ZodOptional<z.ZodString>;
     address: z.ZodOptional<z.ZodString>;
+    location: z.ZodOptional<z.ZodString>;
     credit_limit: z.ZodDefault<z.ZodNumber>;
     notes: z.ZodOptional<z.ZodString>;
 }, z.core.$strip>;

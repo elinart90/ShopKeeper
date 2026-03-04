@@ -13,6 +13,7 @@ export declare class InventoryController {
     restoreProduct(req: ShopRequest, res: Response, next: NextFunction): Promise<void>;
     getLowStockProducts(req: ShopRequest, res: Response, next: NextFunction): Promise<void>;
     getStockHistory(req: Request, res: Response, next: NextFunction): Promise<void>;
+    getShopStockMovements(req: ShopRequest, res: Response, next: NextFunction): Promise<void>;
     createCategory(req: ShopRequest, res: Response, next: NextFunction): Promise<void>;
     getCategories(req: ShopRequest, res: Response, next: NextFunction): Promise<void>;
 }

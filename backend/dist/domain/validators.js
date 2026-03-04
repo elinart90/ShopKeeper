@@ -8,7 +8,7 @@ exports.shopSchema = zod_1.z.object({
     address: zod_1.z.string().optional(),
     phone: zod_1.z.string().optional(),
     email: zod_1.z.string().email().optional(),
-    currency: zod_1.z.string().default('USD'),
+    currency: zod_1.z.string().default('GHS'),
     timezone: zod_1.z.string().default('UTC'),
 });
 const productBaseSchema = zod_1.z.object({
@@ -49,6 +49,7 @@ exports.customerSchema = zod_1.z.object({
     phone: zod_1.z.string().optional(),
     email: zod_1.z.string().email().optional(),
     address: zod_1.z.string().optional(),
+    location: zod_1.z.string().optional(),
     credit_limit: zod_1.z.number().min(0).default(0),
     notes: zod_1.z.string().optional(),
 });

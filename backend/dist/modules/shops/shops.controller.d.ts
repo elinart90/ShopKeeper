@@ -5,6 +5,7 @@ export declare class ShopsController {
     createShop(req: AuthRequest, res: Response, next: NextFunction): Promise<void>;
     getShop(req: Request, res: Response, next: NextFunction): Promise<void>;
     getUserShops(req: AuthRequest, res: Response, next: NextFunction): Promise<void>;
+    getOwnerSummary(req: AuthRequest, res: Response, next: NextFunction): Promise<void>;
     updateShop(req: AuthRequest, res: Response, next: NextFunction): Promise<void>;
     deleteShop(req: AuthRequest, res: Response, next: NextFunction): Promise<void>;
     addMember(req: ShopRequest, res: Response, next: NextFunction): Promise<void>;

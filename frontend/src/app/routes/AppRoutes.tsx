@@ -7,7 +7,7 @@ import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import Header from "../layouts/HeaderForSigninSignup";
 import RequireSuperAdmin from "../../features/admin/components/RequireSuperAdmin";
 import { useAuth } from "../../contexts/useAuth";
-import { authApi, shopsApi, subscriptionsApi } from "../../lib/api";
+import { authApi } from "../../lib/api";
 
 // ── Lazy-loaded page chunks ───────────────────────────────────────────────
 // Auth / public
@@ -92,87 +92,8 @@ function RequireAuth({ children }: { children: ReactElement }) {
   return children;
 }
 
-function RequireSubscription({ children }: { children: ReactElement }) {
-  const { user } = useAuth();
-  const location = useLocation();
-  const [checking, setChecking] = useState(true);
-  const [hasActiveSubscription, setHasActiveSubscription] = useState(false);
-
-  useEffect(() => {
-    let active = true;
-    if (!user) {
-      setChecking(false);
-      setHasActiveSubscription(false);
-      return;
-    }
-
-    setChecking(true);
-    (async () => {
-      try {
-        // Determine owner-vs-member from actual shop membership, not global users.role.
-        // This avoids stale global role values forcing staff into subscription flow.
-        const shopsRes = await shopsApi.getMyShops();
-        if (!active) return;
-        const myShops = (shopsRes.data?.data || []) as Array<{ role?: string }>;
-        const actsAsOwner = myShops.some((s) => String(s?.role || "").toLowerCase() === "owner");
-        if (!actsAsOwner) {
-          setHasActiveSubscription(true);
-          return;
-        }
-
-        const res = await subscriptionsApi.getStatus();
-        if (!active) return;
-        const isActive = !!res.data?.data?.isActive;
-        if (isActive) {
-          setHasActiveSubscription(true);
-          return;
-        }
-        // Super-admins are exempt from subscription gating.
-        const adminStatus = await authApi.getPlatformAdminStatus();
-        if (!active) return;
-        setHasActiveSubscription(!!adminStatus.data?.data?.isPlatformAdmin);
-      } catch {
-        if (!active) return;
-        try {
-          // If subscription status call fails, still allow active super-admins.
-          const adminStatus = await authApi.getPlatformAdminStatus();
-          if (!active) return;
-          setHasActiveSubscription(!!adminStatus.data?.data?.isPlatformAdmin);
-        } catch {
-          if (!active) return;
-          setHasActiveSubscription(false);
-        }
-      } finally {
-        if (active) setChecking(false);
-      }
-    })();
-
-    return () => {
-      active = false;
-    };
-  }, [user?.id, location.pathname]);
-
-  if (checking) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="h-6 w-6 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
-      </div>
-    );
-  }
-
-  if (!hasActiveSubscription) {
-    return <Navigate to="/subscription" replace state={{ from: location }} />;
-  }
-
-  return children;
-}
-
 function RequireAppAccess({ children }: { children: ReactElement }) {
-  return (
-    <RequireAuth>
-      <RequireSubscription>{children}</RequireSubscription>
-    </RequireAuth>
-  );
+  return <RequireAuth>{children}</RequireAuth>;
 }
 
 function AuthenticatedHomeRedirect() {
@@ -263,7 +184,7 @@ export default function AppRoutes() {
           />
           <Route
             path="/shops/create"
-            element={<RequireAppAccess><CreateShopPage /></RequireAppAccess>}
+            element={<RequireAuth><CreateShopPage /></RequireAuth>}
           />
           <Route
             path="/sales/new"

@@ -75,12 +75,14 @@ class SalesService {
         let totalAmount = 0;
         const saleItems = [];
         for (const item of validated.items) {
+            // Soft pre-check: fast early exit for obviously wrong requests.
+            // Not relied upon for correctness — the atomic RPC below is the real guard.
             const product = await inventoryService.getProductById(item.product_id);
             if (product.shop_id !== shopId) {
                 throw new Error(`Product ${item.product_id} does not belong to this shop`);
             }
             if (Number(product.stock_quantity) < item.quantity) {
-                throw new Error(`Insufficient stock for product ${product.name}. Available: ${product.stock_quantity}`);
+                throw new Error(`Insufficient stock for "${product.name}". Available: ${product.stock_quantity}, requested: ${item.quantity}`);
             }
             const itemTotal = item.unit_price * item.quantity - (item.discount_amount || 0);
             const fifo = await this.consumeFifoCost(shopId, item.product_id, Number(item.quantity || 0));
@@ -127,37 +129,82 @@ class SalesService {
             throw new Error('Failed to create sale items');
         }
         for (const item of validated.items) {
-            const product = await inventoryService.getProductById(item.product_id);
-            const newQuantity = Number(product.stock_quantity) - item.quantity;
-            await supabase_1.supabase
-                .from('products')
-                .update({
-                stock_quantity: newQuantity,
-                updated_at: new Date().toISOString(),
-            })
-                .eq('id', item.product_id);
-            await inventoryService.logStockMovement(shopId, item.product_id, userId, 'sale', item.quantity, Number(product.stock_quantity), newQuantity, `Sale ${saleNumber}`);
+            // Preferred path: atomic decrement via PostgreSQL row-level lock.
+            const { data: decrementResult, error: decrementError } = await supabase_1.supabase
+                .rpc('decrement_stock_safe', {
+                p_product_id: item.product_id,
+                p_shop_id: shopId,
+                p_quantity: item.quantity,
+            });
+            let oldQty = 0;
+            let newQty = 0;
+            if (decrementError) {
+                // The RPC may not have been created in this Supabase project yet.
+                // Fall back to a plain UPDATE so sales still complete.
+                const rpcMissing = /could not find|does not exist|function.*schema/i.test(decrementError.message || '');
+                if (!rpcMissing) {
+                    // Real DB error (constraint, permission, etc.) — roll back.
+                    await supabase_1.supabase.from('sale_items').delete().eq('sale_id', sale.id);
+                    await supabase_1.supabase.from('sales').delete().eq('id', sale.id);
+                    throw new Error(`Stock update failed for product ${item.product_id}. Please try again.`);
+                }
+                // Fallback: read current stock and do a direct UPDATE.
+                const { data: prod, error: prodErr } = await supabase_1.supabase
+                    .from('products')
+                    .select('stock_quantity')
+                    .eq('id', item.product_id)
+                    .eq('shop_id', shopId)
+                    .single();
+                if (prodErr || !prod) {
+                    await supabase_1.supabase.from('sale_items').delete().eq('sale_id', sale.id);
+                    await supabase_1.supabase.from('sales').delete().eq('id', sale.id);
+                    throw new Error(`Product not found: ${item.product_id}`);
+                }
+                oldQty = Number(prod.stock_quantity);
+                newQty = oldQty - item.quantity;
+                if (newQty < 0) {
+                    await supabase_1.supabase.from('sale_items').delete().eq('sale_id', sale.id);
+                    await supabase_1.supabase.from('sales').delete().eq('id', sale.id);
+                    throw new Error(`Insufficient stock for product ${item.product_id}. Available: ${oldQty}`);
+                }
+                const { error: updateErr } = await supabase_1.supabase
+                    .from('products')
+                    .update({ stock_quantity: newQty, updated_at: new Date().toISOString() })
+                    .eq('id', item.product_id)
+                    .eq('shop_id', shopId);
+                if (updateErr) {
+                    await supabase_1.supabase.from('sale_items').delete().eq('sale_id', sale.id);
+                    await supabase_1.supabase.from('sales').delete().eq('id', sale.id);
+                    throw new Error(`Stock update failed for product ${item.product_id}. Please try again.`);
+                }
+                logger_1.logger.warn(`decrement_stock_safe RPC missing — used fallback UPDATE for product ${item.product_id}. Create the RPC in Supabase for concurrency safety.`);
+            }
+            else if (!decrementResult?.ok) {
+                // RPC ran but returned ok:false (e.g., insufficient stock).
+                await supabase_1.supabase.from('sale_items').delete().eq('sale_id', sale.id);
+                await supabase_1.supabase.from('sales').delete().eq('id', sale.id);
+                throw new Error(decrementResult?.error ||
+                    `Stock update failed for product ${item.product_id}. Please try again.`);
+            }
+            else {
+                oldQty = Number(decrementResult.old_quantity);
+                newQty = Number(decrementResult.new_quantity);
+            }
+            await inventoryService.logStockMovement(shopId, item.product_id, userId, 'sale', item.quantity, oldQty, newQty, `Sale ${saleNumber}`);
         }
         if (validated.payment_method === 'credit' && validated.customer_id) {
-            const { data: customer } = await supabase_1.supabase
-                .from('customers')
-                .select('credit_balance')
-                .eq('id', validated.customer_id)
-                .single();
-            if (customer) {
-                await supabase_1.supabase
-                    .from('customers')
-                    .update({
-                    credit_balance: Number(customer.credit_balance) + finalAmount,
-                    updated_at: new Date().toISOString(),
-                })
-                    .eq('id', validated.customer_id);
-            }
+            // Use a conditional UPDATE expression so concurrent credit sales
+            // for the same customer don't overwrite each other.
+            await supabase_1.supabase.rpc('increment_credit_balance', {
+                p_customer_id: validated.customer_id,
+                p_shop_id: shopId,
+                p_amount: finalAmount,
+            });
         }
         return this.getSaleById(sale.id);
     }
-    async getSaleById(saleId) {
-        const { data: sale, error } = await supabase_1.supabase
+    async getSaleById(saleId, shopId) {
+        let query = supabase_1.supabase
             .from('sales')
             .select(`
         *,
@@ -167,8 +214,11 @@ class SalesService {
           product:products(*)
         )
       `)
-            .eq('id', saleId)
-            .single();
+            .eq('id', saleId);
+        // When called from the public API endpoint, enforce shop isolation.
+        if (shopId)
+            query = query.eq('shop_id', shopId);
+        const { data: sale, error } = await query.single();
         if (error) {
             logger_1.logger.error('Error fetching sale:', error);
             throw new Error('Sale not found');

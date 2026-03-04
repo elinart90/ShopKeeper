@@ -30,7 +30,9 @@ class WalletsService {
         }
     }
     async getWallets(shopId) {
-        await this.ensureWallets(shopId, 'USD');
+        const { data: shopData } = await supabase_1.supabase.from('shops').select('currency').eq('id', shopId).maybeSingle();
+        const shopCurrency = String(shopData?.currency || 'GHS').trim().toUpperCase() || 'GHS';
+        await this.ensureWallets(shopId, shopCurrency);
         const { data, error } = await supabase_1.supabase
             .from('wallets')
             .select('*')
@@ -61,12 +63,14 @@ class WalletsService {
     }
     async adjustBalance(shopId, userId, body) {
         const v = validators_1.walletAdjustmentSchema.parse(body);
-        const { data: wallet } = await supabase_1.supabase
+        const { data: wallet, error: walletErr } = await supabase_1.supabase
             .from('wallets')
             .select('*')
             .eq('id', v.wallet_id)
             .eq('shop_id', shopId)
-            .single();
+            .maybeSingle();
+        if (walletErr)
+            throw new Error('Failed to fetch wallet');
         if (!wallet)
             throw new Error('Wallet not found');
         const amount = v.type === 'inflow' ? Math.abs(v.amount) : -Math.abs(v.amount);
@@ -99,18 +103,22 @@ class WalletsService {
     }
     async transfer(shopId, userId, body) {
         const v = validators_1.walletTransferSchema.parse(body);
-        const { data: from } = await supabase_1.supabase
+        const { data: from, error: fromFetchErr } = await supabase_1.supabase
             .from('wallets')
             .select('*')
             .eq('id', v.from_wallet_id)
             .eq('shop_id', shopId)
-            .single();
-        const { data: to } = await supabase_1.supabase
+            .maybeSingle();
+        if (fromFetchErr)
+            throw new Error('Failed to fetch source wallet');
+        const { data: to, error: toFetchErr } = await supabase_1.supabase
             .from('wallets')
             .select('*')
             .eq('id', v.to_wallet_id)
             .eq('shop_id', shopId)
-            .single();
+            .maybeSingle();
+        if (toFetchErr)
+            throw new Error('Failed to fetch destination wallet');
         if (!from || !to)
             throw new Error('Wallet not found');
         if (Number(from.balance) < v.amount)
@@ -138,16 +146,20 @@ class WalletsService {
         });
         if (txInErr)
             throw new Error('Failed to record transfer');
-        await supabase_1.supabase
+        const { error: fromErr } = await supabase_1.supabase
             .from('wallets')
             .update({ balance: Number(from.balance) - v.amount, updated_at: new Date().toISOString() })
             .eq('id', v.from_wallet_id);
-        const { data: toUpdated } = await supabase_1.supabase
+        if (fromErr)
+            throw new Error('Failed to debit source wallet');
+        const { data: toUpdated, error: toErr } = await supabase_1.supabase
             .from('wallets')
             .update({ balance: Number(to.balance) + v.amount, updated_at: new Date().toISOString() })
             .eq('id', v.to_wallet_id)
             .select()
             .single();
+        if (toErr)
+            throw new Error('Failed to credit destination wallet');
         return toUpdated;
     }
 }

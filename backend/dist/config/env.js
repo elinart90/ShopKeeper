@@ -20,7 +20,7 @@ exports.env = {
     openaiApiKey: process.env.OPENAI_API_KEY || '',
     openaiModel: process.env.OPENAI_MODEL || 'gpt-4o-mini',
     claudeApiKey: process.env.CLAUDE_API_KEY || '',
-    claudeModel: process.env.CLAUDE_MODEL || 'claude-3-5-sonnet-latest',
+    claudeModel: process.env.CLAUDE_MODEL || 'claude-3-5-sonnet-20241022',
     email: {
         host: process.env.EMAIL_HOST || 'smtp.gmail.com',
         port: parseInt(process.env.EMAIL_PORT || '587', 10),

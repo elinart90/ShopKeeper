@@ -571,6 +571,22 @@ Important rules:
             throw new Error('Failed to fetch stock history');
         return data || [];
     }
+    async getShopStockMovements(shopId, from, to) {
+        let query = supabase_1.supabase
+            .from('stock_movements')
+            .select('*, product:products(id,name,unit)')
+            .eq('shop_id', shopId)
+            .order('created_at', { ascending: false })
+            .limit(500);
+        if (from)
+            query = query.gte('created_at', new Date(from + 'T00:00:00').toISOString());
+        if (to)
+            query = query.lte('created_at', new Date(to + 'T23:59:59').toISOString());
+        const { data, error } = await query;
+        if (error)
+            throw new Error('Failed to fetch stock movements');
+        return data || [];
+    }
     async createCategory(shopId, data) {
         const { data: category, error } = await supabase_1.supabase
             .from('categories')

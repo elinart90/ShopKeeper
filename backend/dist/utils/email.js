@@ -9,10 +9,10 @@ exports.sendGenericEmail = sendGenericEmail;
 const nodemailer_1 = __importDefault(require("nodemailer"));
 const env_1 = require("../config/env");
 const logger_1 = require("./logger");
-let transporter = null;
-function getTransporter() {
-    if (transporter)
-        return transporter;
+// Do NOT cache the transporter globally — if it fails once (e.g. ETIMEDOUT)
+// the cached broken instance would silently drop every subsequent email.
+// Instead, create a fresh instance per call (cheap, stateless).
+function createTransporter() {
     const { email } = env_1.env;
     const normalizedUser = String(email.user || '').trim();
     let normalizedPassword = String(email.password || '').trim();
@@ -24,7 +24,7 @@ function getTransporter() {
         logger_1.logger.warn('Email not configured (EMAIL_USER/EMAIL_PASSWORD missing). PIN emails will not be sent.');
         return null;
     }
-    transporter = nodemailer_1.default.createTransport({
+    return nodemailer_1.default.createTransport({
         host: String(email.host || '').trim(),
         port: Number(email.port || 587),
         secure: email.secure,
@@ -32,14 +32,18 @@ function getTransporter() {
             user: normalizedUser,
             pass: normalizedPassword,
         },
+        // Prevent indefinite hangs — fail fast so the server isn't blocked.
+        connectionTimeout: 10000, // 10 s to establish TCP
+        greetingTimeout: 8000, // 8 s to receive SMTP greeting
+        socketTimeout: 15000, // 15 s inactivity before giving up
+        tls: { rejectUnauthorized: false },
     });
-    return transporter;
 }
 /**
  * Send the 6-digit PIN for password reset.
  */
 async function sendPasswordResetPinEmail(to, pin) {
-    const transport = getTransporter();
+    const transport = createTransporter();
     if (!transport)
         return false;
     try {
@@ -66,7 +70,7 @@ async function sendPasswordResetPinEmail(to, pin) {
  * Send the 6-digit PIN to open the dashboard edit interface (refunds, clear data, etc.).
  */
 async function sendClearDataPinEmail(to, pin) {
-    const transport = getTransporter();
+    const transport = createTransporter();
     if (!transport)
         return false;
     try {
@@ -93,7 +97,7 @@ async function sendClearDataPinEmail(to, pin) {
  * Generic email helper for operational notifications.
  */
 async function sendGenericEmail(params) {
-    const transport = getTransporter();
+    const transport = createTransporter();
     if (!transport)
         return false;
     try {

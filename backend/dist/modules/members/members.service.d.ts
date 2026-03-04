@@ -2,7 +2,7 @@ export declare class MembersService {
     private static readonly ALLOWED_PAYMENT_METHODS;
     createCustomer(shopId: string, data: any): Promise<any>;
     getCustomers(shopId: string, search?: string): Promise<any[]>;
-    getCustomerById(customerId: string): Promise<any>;
+    getCustomerById(customerId: string, shopId?: string): Promise<any>;
     updateCustomer(customerId: string, shopId: string, data: any): Promise<any>;
     /** Credit & Customer Risk: customers owing money and total exposure */
     getCreditSummary(shopId: string): Promise<{
@@ -13,6 +13,7 @@ export declare class MembersService {
             name: any;
             phone: any;
             email: any;
+            location: any;
             credit_balance: number;
             credit_limit: number;
         }[];

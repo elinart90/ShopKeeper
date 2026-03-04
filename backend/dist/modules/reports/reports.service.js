@@ -32,6 +32,12 @@ async function getDataClearedAt(shopId) {
         .single();
     return data?.data_cleared_at ?? null;
 }
+/** Get shop currency for reports (default GHS). */
+async function getShopCurrency(shopId) {
+    const { data } = await supabase_1.supabase.from('shops').select('currency').eq('id', shopId).maybeSingle();
+    const code = String(data?.currency || 'GHS').trim().toUpperCase();
+    return code || 'GHS';
+}
 class ReportsService {
     normalizeCurrencyText(text, currencyCode = 'GHS') {
         return String(text || '')
@@ -1316,13 +1322,15 @@ Question: ${query}
             totalTransactions: Number(data?.totalTransactions || 0),
         };
     }
-    async summarizeWithAi(query, language, intent, snapshot) {
+    async summarizeWithAi(query, language, intent, snapshot, currency = 'GHS') {
         const langInstruction = language === 'twi'
             ? 'Respond in natural Ghanaian Twi. Keep numerals as-is.'
             : 'Respond in clear English.';
+        const currencyRule = `Use ${currency} for all monetary amounts. Never use "$" or "USD".`;
         const prompt = `
 You are ShopKeeper owner copilot.
 ${langInstruction}
+${currencyRule}
 Answer the owner question using only the report snapshot.
 Keep answer practical and concise:
 - one headline insight
@@ -1394,7 +1402,8 @@ ${JSON.stringify(snapshot, null, 2)}
             periodLabel = `Dashboard summary (${startDate} to ${endDate})`;
         }
         const snapshot = this.buildSnapshot(intent, rawData);
-        const summary = await this.summarizeWithAi(cleanQuery, language, intent, snapshot);
+        const currency = await getShopCurrency(shopId);
+        const summary = await this.summarizeWithAi(cleanQuery, language, intent, snapshot, currency);
         const chartReferences = intent === 'sales_intelligence'
             ? {
                 key: 'recentDailyMetrics',

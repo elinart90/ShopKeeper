@@ -69,7 +69,10 @@ export declare class AuthService {
      */
     resolveUserId(userIdFromToken: string, emailFromToken?: string): Promise<string>;
     private createToken;
-    /** Request password reset: send 6-digit PIN to email. Always returns success (don't reveal if email exists). */
+    /** Request password reset: send 6-digit PIN to email. Always returns success (don't reveal if email exists).
+     *  Stores the PIN in the shared pin_verifications table (purpose='password_reset', shop_id=null)
+     *  — same table that Dashboard Edit uses, so no extra table creation is required.
+     */
     forgotPasswordRequest(email: string): Promise<{
         message: string;
     }>;

@@ -220,6 +220,19 @@ class InventoryController {
             (0, errorHandler_1.errorHandler)(error, req, res, next);
         }
     }
+    async getShopStockMovements(req, res, next) {
+        try {
+            if (!req.shopId)
+                throw new errorHandler_1.AppError('Shop ID is required', 400);
+            const from = req.query.from || undefined;
+            const to = req.query.to || undefined;
+            const data = await inventoryService.getShopStockMovements(req.shopId, from, to);
+            res.json({ success: true, data });
+        }
+        catch (error) {
+            (0, errorHandler_1.errorHandler)(error, req, res, next);
+        }
+    }
     // Categories
     async createCategory(req, res, next) {
         try {

@@ -54,6 +54,26 @@ export declare class ShopsService {
     /**
      * Owner-only (via dashboard edit token): reset data_cleared_at so the main dashboard shows all data again.
      */
+    /**
+     * Aggregated summary across ALL shops owned by userId.
+     * Used for the owner "All Stores" dashboard view.
+     */
+    getOwnerSummary(userId: string, startDate?: string, endDate?: string): Promise<{
+        shops: {
+            id: any;
+            name: any;
+            currency: any;
+            totalSales: number;
+            totalRevenue: number;
+            totalProducts: number;
+        }[];
+        totals: {
+            totalShops: number;
+            totalSales: number;
+            totalRevenue: number;
+            totalProducts: number;
+        };
+    }>;
     resetDashboardView(shopId: string, userId: string): Promise<{
         reset: boolean;
     }>;

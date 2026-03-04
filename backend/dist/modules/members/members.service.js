@@ -35,12 +35,15 @@ class MembersService {
         }
         return data || [];
     }
-    async getCustomerById(customerId) {
-        const { data, error } = await supabase_1.supabase
+    async getCustomerById(customerId, shopId) {
+        let query = supabase_1.supabase
             .from('customers')
             .select('*')
-            .eq('id', customerId)
-            .single();
+            .eq('id', customerId);
+        // Enforce shop isolation when called from the public API endpoint.
+        if (shopId)
+            query = query.eq('shop_id', shopId);
+        const { data, error } = await query.single();
         if (error) {
             logger_1.logger.error('Error fetching customer:', error);
             throw new Error('Customer not found');
@@ -66,7 +69,7 @@ class MembersService {
     async getCreditSummary(shopId) {
         const { data, error } = await supabase_1.supabase
             .from('customers')
-            .select('id, name, phone, email, credit_balance, credit_limit')
+            .select('id, name, phone, email, location, credit_balance, credit_limit')
             .eq('shop_id', shopId)
             .gt('credit_balance', 0)
             .order('credit_balance', { ascending: false });
@@ -79,6 +82,7 @@ class MembersService {
             name: c.name,
             phone: c.phone,
             email: c.email,
+            location: c.location || null,
             credit_balance: Number(c.credit_balance || 0),
             credit_limit: Number(c.credit_limit || 0),
         }));

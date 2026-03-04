@@ -2,7 +2,7 @@ export declare class SalesService {
     private consumeFifoCost;
     private restoreCostLayerFromReturn;
     createSale(shopId: string, userId: string, data: any): Promise<any>;
-    getSaleById(saleId: string): Promise<any>;
+    getSaleById(saleId: string, shopId?: string): Promise<any>;
     getSales(shopId: string, filters?: {
         startDate?: string;
         endDate?: string;

@@ -63,6 +63,7 @@ export declare class InventoryService {
     logStockMovement(shopId: string, productId: string, userId: string, action: string, quantity: number, previousQuantity: number, newQuantity: number, notes?: string): Promise<void>;
     addCostLayer(shopId: string, productId: string, userId: string, quantity: number, unitCost: number, sourceType: string, sourceId?: string): Promise<void>;
     getStockHistory(productId: string, limit?: number): Promise<any[]>;
+    getShopStockMovements(shopId: string, from?: string, to?: string): Promise<any[]>;
     createCategory(shopId: string, data: {
         name: string;
         description?: string;

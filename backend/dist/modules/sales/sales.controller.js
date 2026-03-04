@@ -41,8 +41,10 @@ class SalesController {
     }
     async getSale(req, res, next) {
         try {
+            if (!req.shopId)
+                throw new errorHandler_1.AppError('Shop ID is required', 400);
             const id = (0, params_1.getParam)(req, 'id');
-            const sale = await salesService.getSaleById(id);
+            const sale = await salesService.getSaleById(id, req.shopId);
             res.json({ success: true, data: sale });
         }
         catch (error) {
