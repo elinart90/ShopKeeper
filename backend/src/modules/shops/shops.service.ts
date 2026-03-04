@@ -12,6 +12,13 @@ const authService = new AuthService();
 
 const STAFF_ROLES = ['manager', 'cashier', 'staff'] as const;
 
+function createHttpError(message: string, statusCode: number, code?: string) {
+  const err = new Error(message) as Error & { statusCode?: number; code?: string };
+  err.statusCode = statusCode;
+  err.code = code;
+  return err;
+}
+
 export class ShopsService {
   private isMissingBillingCycleColumn(error: unknown): boolean {
     const e = error as { code?: string; message?: string };
@@ -378,25 +385,38 @@ export class ShopsService {
   }
 
   async deleteShop(shopId: string, userId: string) {
-    const { data: shop } = await supabase.from('shops').select('id, owner_id').eq('id', shopId).single();
-    if (!shop) throw new Error('Shop not found');
-    if (shop.owner_id !== userId) throw new Error('Only the owner can delete this shop');
+    const { data: shop, error: shopError } = await supabase
+      .from('shops')
+      .select('id, owner_id')
+      .eq('id', shopId)
+      .maybeSingle();
+    if (shopError) {
+      logger.error('Error loading shop before delete:', shopError);
+      throw createHttpError('Failed to validate shop before deletion', 500, 'SHOP_DELETE_PRECHECK_FAILED');
+    }
+    if (!shop) throw createHttpError('Shop not found', 404, 'SHOP_NOT_FOUND');
+    if (shop.owner_id !== userId) {
+      throw createHttpError('Only the owner can delete this shop', 403, 'SHOP_DELETE_FORBIDDEN');
+    }
 
+    // Most environments have ON DELETE CASCADE, but we still remove sale_items explicitly
+    // for compatibility with older schemas that may miss this FK cascade.
     const { data: sales } = await supabase.from('sales').select('id').eq('shop_id', shopId);
     const saleIds = (sales || []).map((s: any) => s.id);
     if (saleIds.length > 0) {
       const { error: itemsErr } = await supabase.from('sale_items').delete().in('sale_id', saleIds);
       if (itemsErr) {
-        logger.error('Error deleting sale_items:', itemsErr);
-        throw new Error('Failed to delete shop');
+        logger.error('Error deleting sale_items before shop delete:', itemsErr);
+        throw createHttpError('Failed to delete store data', 500, 'SHOP_DELETE_DEPENDENCY_FAILED');
       }
     }
 
-    const { error } = await supabase.from('shops').delete().eq('id', shopId);
+    const { error } = await supabase.from('shops').delete().eq('id', shopId).eq('owner_id', userId);
     if (error) {
       logger.error('Error deleting shop:', error);
-      throw new Error('Failed to delete shop');
+      throw createHttpError('Failed to delete shop', 500, 'SHOP_DELETE_FAILED');
     }
+
     return { deleted: true };
   }
 

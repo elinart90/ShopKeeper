@@ -21,6 +21,12 @@ interface Product {
 }
 
 export default function InventoryList() {
+  const movementTypeLabel = (action: string) => {
+    if (action === 'purchase') return 'added';
+    if (action === 'adjustment') return 'updated';
+    return action;
+  };
+
   const { currentShop } = useShop();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -37,8 +43,15 @@ export default function InventoryList() {
   const [movementsLoading, setMovementsLoading] = useState(false);
 
   const totalQtyAdded = useMemo(
-    () => movements.filter((m) => m.action === 'purchase' || Number(m.quantity) > 0)
-                   .reduce((s, m) => s + Number(m.quantity || 0), 0),
+    () =>
+      movements.reduce((sum, m) => {
+        const prev = Number(m.previous_quantity ?? 0);
+        const next = Number(m.new_quantity ?? 0);
+        const delta = Number.isFinite(prev) && Number.isFinite(next)
+          ? next - prev
+          : Number(m.quantity || 0);
+        return delta > 0 ? sum + delta : sum;
+      }, 0),
     [movements]
   );
 
@@ -431,7 +444,7 @@ export default function InventoryList() {
             </h2>
           </div>
           <p className="text-xs text-gray-500 dark:text-gray-400 mb-5">
-            Shows each stock-in event: the quantity that was left before, how much was added, and the new total after.
+            Shows each stock event: quantity before, quantity change (plus/minus), and new total after.
           </p>
 
           {/* Date pickers */}
@@ -496,17 +509,20 @@ export default function InventoryList() {
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Product name</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Date</th>
                       <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Item left before</th>
-                      <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Qty added</th>
+                      <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Qty change</th>
                       <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Total qty</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Type</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
                     {movements.map((m, idx) => {
-                      const qtyAdded = Number(m.quantity || 0);
+                      const fallbackQty = Number(m.quantity || 0);
                       const prevQty  = Number(m.previous_quantity ?? 0);
                       const newQty   = Number(m.new_quantity ?? 0);
-                      const isInflow = qtyAdded > 0;
+                      const qtyChange = Number.isFinite(prevQty) && Number.isFinite(newQty)
+                        ? newQty - prevQty
+                        : fallbackQty;
+                      const isInflow = qtyChange >= 0;
                       return (
                         <tr key={m.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
                           <td className="px-4 py-3 text-gray-400 dark:text-gray-500">{idx + 1}</td>
@@ -520,7 +536,7 @@ export default function InventoryList() {
                             {prevQty} {m.product?.unit ?? ''}
                           </td>
                           <td className={`px-4 py-3 text-right font-semibold ${isInflow ? 'text-emerald-700 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
-                            {isInflow ? '+' : ''}{qtyAdded} {m.product?.unit ?? ''}
+                            {isInflow ? '+' : ''}{qtyChange} {m.product?.unit ?? ''}
                           </td>
                           <td className="px-4 py-3 text-right font-bold text-gray-900 dark:text-white">
                             {newQty} {m.product?.unit ?? ''}
@@ -531,7 +547,7 @@ export default function InventoryList() {
                               : m.action === 'sale'   ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300'
                               : 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300'
                             }`}>
-                              {m.action}
+                              {movementTypeLabel(String(m.action || ''))}
                             </span>
                           </td>
                         </tr>

@@ -75,6 +75,17 @@ export function ShopProvider({ children }: { children: ReactNode }) {
       await refreshShops();
       toast.success('Store deleted permanently');
     } catch (error: any) {
+      const status = Number(error?.response?.status || 0);
+      if (status === 404) {
+        // If stale cache shows a shop already deleted elsewhere, recover UI by refreshing.
+        if (currentShop?.id === shopId) {
+          setCurrentShop(null);
+          clearShopId();
+        }
+        await refreshShops();
+        toast.success('Store removed');
+        return;
+      }
       const msg = error.response?.data?.error?.message || error.message || 'Failed to delete store';
       toast.error(msg);
     }

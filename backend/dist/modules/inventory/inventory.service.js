@@ -502,11 +502,25 @@ Important rules:
         return product;
     }
     async deleteProduct(productId, shopId) {
-        await supabase_1.supabase
+        const { error: productDeleteError } = await supabase_1.supabase
             .from('products')
             .update({ is_active: false, updated_at: new Date().toISOString() })
             .eq('id', productId)
             .eq('shop_id', shopId);
+        if (productDeleteError) {
+            logger_1.logger.error('Error deleting product:', productDeleteError);
+            throw new Error('Failed to delete product');
+        }
+        // Business rule: once a product is deleted, clear its movement history.
+        const { error: movementDeleteError } = await supabase_1.supabase
+            .from('stock_movements')
+            .delete()
+            .eq('product_id', productId)
+            .eq('shop_id', shopId);
+        if (movementDeleteError) {
+            logger_1.logger.error('Error clearing stock movement history for deleted product:', movementDeleteError);
+            throw new Error('Failed to clear stock movement history');
+        }
         return { success: true };
     }
     async restoreProduct(productId, shopId) {
@@ -534,11 +548,16 @@ Important rules:
         return (data || []).filter((p) => Number(p.stock_quantity) <= Number(p.min_stock_level || 0));
     }
     async logStockMovement(shopId, productId, userId, action, quantity, previousQuantity, newQuantity, notes) {
+        const prev = Number(previousQuantity);
+        const next = Number(newQuantity);
+        const delta = Number.isFinite(prev) && Number.isFinite(next)
+            ? Number((next - prev).toFixed(3))
+            : Number(quantity || 0);
         await supabase_1.supabase.from('stock_movements').insert({
             shop_id: shopId,
             product_id: productId,
             action,
-            quantity,
+            quantity: delta,
             previous_quantity: previousQuantity,
             new_quantity: newQuantity,
             notes,

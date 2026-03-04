@@ -589,11 +589,27 @@ Important rules:
   }
 
   async deleteProduct(productId: string, shopId: string) {
-    await supabase
+    const { error: productDeleteError } = await supabase
       .from('products')
       .update({ is_active: false, updated_at: new Date().toISOString() })
       .eq('id', productId)
       .eq('shop_id', shopId);
+    if (productDeleteError) {
+      logger.error('Error deleting product:', productDeleteError);
+      throw new Error('Failed to delete product');
+    }
+
+    // Business rule: once a product is deleted, clear its movement history.
+    const { error: movementDeleteError } = await supabase
+      .from('stock_movements')
+      .delete()
+      .eq('product_id', productId)
+      .eq('shop_id', shopId);
+    if (movementDeleteError) {
+      logger.error('Error clearing stock movement history for deleted product:', movementDeleteError);
+      throw new Error('Failed to clear stock movement history');
+    }
+
     return { success: true };
   }
 
@@ -635,11 +651,17 @@ Important rules:
     newQuantity: number,
     notes?: string
   ) {
+    const prev = Number(previousQuantity);
+    const next = Number(newQuantity);
+    const delta = Number.isFinite(prev) && Number.isFinite(next)
+      ? Number((next - prev).toFixed(3))
+      : Number(quantity || 0);
+
     await supabase.from('stock_movements').insert({
       shop_id: shopId,
       product_id: productId,
       action,
-      quantity,
+      quantity: delta,
       previous_quantity: previousQuantity,
       new_quantity: newQuantity,
       notes,
