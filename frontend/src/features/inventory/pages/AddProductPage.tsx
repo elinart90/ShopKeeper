@@ -754,7 +754,7 @@ export default function AddProductPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-4 pb-24">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-4 pb-44 md:pd-24">
       <div className="max-w-lg mx-auto">
         <Link to="/inventory" className="inline-flex items-center gap-2 text-gray-600 dark:text-gray-400 mb-4">
           <ArrowLeft className="h-4 w-4" /> Back
@@ -953,7 +953,7 @@ export default function AddProductPage() {
         {errors.submit && <p className="text-red-500 text-sm mb-4">{errors.submit}</p>}
 
         {/* Bottom actions */}
-        <div className="fixed bottom-0 left-0 right-0 p-4 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 flex gap-3">
+        <div className="fixed bottom-[72px] left-0 right-0 p-4 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 flex gap-3 z-40 sm:bottom-0">
           <button
             onClick={() => handleSave(false)}
             disabled={saving}
