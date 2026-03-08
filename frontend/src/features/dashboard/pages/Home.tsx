@@ -1,4 +1,4 @@
-import { useNavigate, Link, useSearchParams } from "react-router-dom";
+import { useNavigate, Link, useSearchParams, useLocation } from "react-router-dom";
 import { useEffect, useState, useRef } from "react";
 import {
   ShoppingCart,
@@ -34,6 +34,10 @@ import { useAuth } from "../../../contexts/useAuth";
 import { useTheme } from "../../../contexts/ThemeContext";
 import { reportsApi, walletsApi, dailyCloseApi, shopsApi, salesApi, authApi, clearShopId, controlsApi } from "../../../lib/api";
 import { cacheDashboardStats, getCachedDashboardStats } from "../../../offline/dashboardCache";
+import { useSyncQueueCount } from "../../../hooks/useSyncQueueCount";
+import DashboardEditPage from "./DashboardEditPage";
+import NewSalePage from "../../sales/pages/NewSale";
+import InventoryListPage from "../../inventory/pages/InventoryList";
 import type {
   BusinessIntelligenceData,
   BusinessIntelligenceQueryData,
@@ -50,6 +54,8 @@ import CreditTab from "../components/CreditTab";
 
 const TABS = [
   { id: "overview", label: "Overview", icon: BarChart3 },
+  { id: "new-sales", label: "New Sales", icon: ShoppingCart },
+  { id: "inventory", label: "Inventory", icon: Package },
   { id: "money-flow", label: "Money Flow", icon: Wallet, ownerOnly: true },
   { id: "inventory-finance", label: "Inventory Finance", icon: Package, ownerOnly: true },
   { id: "expenses", label: "Expenses & Profit", icon: PieChart, ownerOnly: true },
@@ -256,6 +262,7 @@ function ShopSwitcher({
 
 export default function Home() {
   const { user, logout } = useAuth();
+  const location = useLocation();
   const navigate = useNavigate();
   const { currentShop, shops, loading: shopLoading, lastError, selectShop, refreshShops, deleteShop } = useShop();
   const [activeTab, setActiveTab] = useState<TabId>("overview");
@@ -263,6 +270,7 @@ export default function Home() {
   const [intelligence, setIntelligence] = useState<any>(null);
   const [loadingStats, setLoadingStats] = useState(true);
   const [allStoresMode, setAllStoresMode] = useState(false);
+  const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
   const [ownerSummary, setOwnerSummary] = useState<{
     shops: Array<{ id: string; name: string; currency: string; totalSales: number; totalRevenue: number; totalProducts: number }>;
     totals: { totalShops: number; totalRevenue: number; totalSales: number; totalProducts: number };
@@ -279,6 +287,7 @@ export default function Home() {
     };
   });
   const liveTime = useLiveTime();
+  const queue = useSyncQueueCount();
 
   useEffect(() => {
     if (allStoresMode) {
@@ -304,6 +313,10 @@ export default function Home() {
       setActiveTab(requested);
     }
   }, [searchParams, currentShop?.role]);
+
+  useEffect(() => {
+    setMobileMoreOpen(false);
+  }, [activeTab, currentShop?.id]);
 
   const loadStats = async () => {
     if (!currentShop) return;
@@ -472,14 +485,85 @@ export default function Home() {
 
   const currency = currentShop.currency || "GHS";
   const visibleTabs = getVisibleTabs(currentShop?.role);
+  const isOwner = currentShop?.role === "owner";
+  const mobileMoreTabs: TabId[] = isOwner
+    ? ["money-flow", "inventory-finance", "expenses", "staff", "reports", "settings"]
+    : ["settings"];
+  const isNewSalesActive = location.pathname.startsWith("/sales");
+  const isInventoryActive = location.pathname.startsWith("/inventory");
+  const isMoreActive = mobileMoreOpen || mobileMoreTabs.includes(activeTab);
+  const desktopMainTabs = visibleTabs.filter(
+    (t) => t.id === "overview" || t.id === "new-sales" || t.id === "inventory" || t.id === "credit"
+  );
+  const desktopInsightsTabs = visibleTabs.filter(
+    (t) => t.id === "money-flow" || t.id === "inventory-finance" || t.id === "expenses" || t.id === "reports"
+  );
+  const desktopManageTabs = visibleTabs.filter(
+    (t) => t.id === "staff" || t.id === "dashboard-edit" || t.id === "settings"
+  );
 
   const handleTabSelect = (id: TabId) => {
-    if (id === "dashboard-edit") {
-      navigate("/dashboard/edit");
-      return;
-    }
     setActiveTab(id);
   };
+
+  const handleMobilePrimaryTab = (id: "overview" | "credit") => {
+    if (allStoresMode) setAllStoresMode(false);
+    setActiveTab(id);
+    setMobileMoreOpen(false);
+  };
+
+  const renderDashboardContent = () => (
+    <>
+      {/* All-Stores owner view */}
+      {allStoresMode && activeTab === "overview" && (
+        <AllStoresOverview
+          summary={ownerSummary}
+          loading={loadingOwnerSummary}
+          dateRangeLabel={formatDateRange(dateRange.start, dateRange.end)}
+          onSelectShop={(shopId) => {
+            const s = shops.find((sh) => sh.id === shopId);
+            if (s) { setAllStoresMode(false); selectShop(s); }
+          }}
+        />
+      )}
+      {(!allStoresMode || activeTab !== "overview") && activeTab === "overview" && (
+        <OverviewTab
+          currency={currency}
+          stats={stats}
+          intelligence={intelligence}
+          loading={loadingStats}
+          dateRangeLabel={formatDateRange(dateRange.start, dateRange.end)}
+          onNavigate={navigate}
+        />
+      )}
+      {activeTab === "money-flow" && (
+        <MoneyFlowTab currency={currency} currentShop={currentShop} />
+      )}
+      {activeTab === "inventory-finance" && (
+        <InventoryFinanceTab currency={currency} onNavigate={navigate} />
+      )}
+      {activeTab === "expenses" && (
+        <ExpensesTab
+          currency={currency}
+          dateRange={dateRange}
+          onNavigate={navigate}
+        />
+      )}
+      {activeTab === "staff" && (
+        <StaffTab
+          currency={currency}
+          currentShop={currentShop}
+          intelligence={intelligence}
+        />
+      )}
+      {activeTab === "credit" && <CreditTab onNavigate={navigate} />}
+      {activeTab === "reports" && <ReportsTab />}
+      {activeTab === "new-sales" && <NewSalePage />}
+      {activeTab === "inventory" && <InventoryListPage />}
+      {activeTab === "dashboard-edit" && <DashboardEditPage />}
+      {activeTab === "settings" && <SettingsTab />}
+    </>
+  );
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
@@ -591,74 +675,243 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Desktop tabs */}
-      <div className="hidden sm:block border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-4">
-        <nav className="flex gap-1 overflow-x-auto py-2">
-          {visibleTabs.map(({ id, label, icon: Icon }) => (
-            <button
-              key={id}
-              onClick={() => handleTabSelect(id)}
-              className={`flex items-center gap-2 px-4 py-2 rounded-t-lg text-sm font-medium whitespace-nowrap transition ${
-                activeTab === id
-                  ? "btn-tab-gradient"
-                  : "text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/80"
-              }`}
-            >
-              <Icon className="h-4 w-4" />
-              {label}
-            </button>
-          ))}
-        </nav>
+      {/* Content */}
+      <div className="p-4 pb-24 sm:pb-4 max-w-7xl mx-auto min-h-[320px]">
+        <div className="hidden sm:grid grid-cols-[260px_minmax(0,1fr)] gap-4">
+          <aside className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white/90 dark:bg-slate-900/80 shadow-sm p-3 h-fit sticky top-24 transition-all duration-200 ease-[cubic-bezier(0.22,1,0.36,1)]">
+            <div className="mb-2 px-2 text-[10px] tracking-[0.18em] font-semibold text-gray-500 dark:text-gray-400 uppercase">
+              Main
+            </div>
+            <div className="space-y-1 mb-3">
+              {desktopMainTabs.map(({ id, label, icon: Icon }) => {
+                const active = activeTab === id;
+                return (
+                  <button
+                    key={id}
+                    onClick={() => handleTabSelect(id)}
+                    className={`w-full relative flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150 ${
+                      active
+                        ? "bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 shadow-[inset_0_0_0_1px_rgba(16,185,129,0.25)]"
+                        : "text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 hover:translate-x-[2px]"
+                    }`}
+                  >
+                    <span className={`absolute left-0 top-1/2 -translate-y-1/2 w-1 rounded-r transition-all duration-150 ${active ? "h-6 bg-emerald-500" : "h-0 bg-transparent"}`} />
+                    <Icon className="h-4 w-4" />
+                    <span>{label}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {desktopInsightsTabs.length > 0 && (
+              <>
+                <div className="mb-2 mt-1 px-2 text-[10px] tracking-[0.18em] font-semibold text-gray-500 dark:text-gray-400 uppercase">
+                  Insights
+                </div>
+                <div className="space-y-1 mb-3">
+                  {desktopInsightsTabs.map(({ id, label, icon: Icon }) => {
+                    const active = activeTab === id;
+                    return (
+                      <button
+                        key={id}
+                        onClick={() => handleTabSelect(id)}
+                        className={`w-full relative flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150 ${
+                          active
+                            ? "bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 shadow-[inset_0_0_0_1px_rgba(16,185,129,0.25)]"
+                            : "text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 hover:translate-x-[2px]"
+                        }`}
+                      >
+                        <span className={`absolute left-0 top-1/2 -translate-y-1/2 w-1 rounded-r transition-all duration-150 ${active ? "h-6 bg-emerald-500" : "h-0 bg-transparent"}`} />
+                        <Icon className="h-4 w-4" />
+                        <span>{label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+
+            {desktopManageTabs.length > 0 && (
+              <>
+                <div className="mb-2 mt-1 px-2 text-[10px] tracking-[0.18em] font-semibold text-gray-500 dark:text-gray-400 uppercase">
+                  Management
+                </div>
+                <div className="space-y-1">
+                  {desktopManageTabs.map(({ id, label, icon: Icon }) => {
+                    const active = activeTab === id;
+                    return (
+                      <button
+                        key={id}
+                        onClick={() => handleTabSelect(id)}
+                        className={`w-full relative flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150 ${
+                          active
+                            ? "bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 shadow-[inset_0_0_0_1px_rgba(16,185,129,0.25)]"
+                            : "text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 hover:translate-x-[2px]"
+                        }`}
+                      >
+                        <span className={`absolute left-0 top-1/2 -translate-y-1/2 w-1 rounded-r transition-all duration-150 ${active ? "h-6 bg-emerald-500" : "h-0 bg-transparent"}`} />
+                        <Icon className="h-4 w-4" />
+                        <span>{label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+
+          </aside>
+
+          <section className="transition-all duration-200 ease-[cubic-bezier(0.22,1,0.36,1)]">
+            {renderDashboardContent()}
+          </section>
+        </div>
+
+        <div className="sm:hidden">
+          {renderDashboardContent()}
+        </div>
       </div>
 
-      {/* Content */}
-      <div className="p-4 max-w-7xl mx-auto min-h-[320px]">
-        {/* All-Stores owner view */}
-        {allStoresMode && activeTab === "overview" && (
-          <AllStoresOverview
-            summary={ownerSummary}
-            loading={loadingOwnerSummary}
-            dateRangeLabel={formatDateRange(dateRange.start, dateRange.end)}
-            onSelectShop={(shopId) => {
-              const s = shops.find((sh) => sh.id === shopId);
-              if (s) { setAllStoresMode(false); selectShop(s); }
+      {/* Mobile bottom navigation */}
+      <div className="sm:hidden fixed bottom-0 inset-x-0 z-40 border-t border-gray-200 dark:border-gray-700 bg-white/95 dark:bg-gray-800/95 backdrop-blur supports-[backdrop-filter]:bg-white/80">
+        <div className="grid grid-cols-5">
+          <button
+            onClick={() => handleMobilePrimaryTab("overview")}
+            className={`py-2.5 text-[11px] font-medium flex flex-col items-center gap-1 ${
+              activeTab === "overview"
+                ? "text-emerald-600 dark:text-emerald-400"
+                : "text-gray-500 dark:text-gray-400"
+            }`}
+          >
+            <BarChart3 className="h-5 w-5" />
+            <span>Overview</span>
+          </button>
+          <button
+            onClick={() => {
+              navigate("/sales/new");
+              setMobileMoreOpen(false);
             }}
-          />
-        )}
-        {(!allStoresMode || activeTab !== "overview") && activeTab === "overview" && (
-          <OverviewTab
-            currency={currency}
-            stats={stats}
-            intelligence={intelligence}
-            loading={loadingStats}
-            dateRangeLabel={formatDateRange(dateRange.start, dateRange.end)}
-            onNavigate={navigate}
-          />
-        )}
-        {activeTab === "money-flow" && (
-          <MoneyFlowTab currency={currency} currentShop={currentShop} />
-        )}
-        {activeTab === "inventory-finance" && (
-          <InventoryFinanceTab currency={currency} onNavigate={navigate} />
-        )}
-        {activeTab === "expenses" && (
-          <ExpensesTab
-            currency={currency}
-            dateRange={dateRange}
-            onNavigate={navigate}
-          />
-        )}
-        {activeTab === "staff" && (
-          <StaffTab
-            currency={currency}
-            currentShop={currentShop}
-            intelligence={intelligence}
-          />
-        )}
-        {activeTab === "credit" && <CreditTab onNavigate={navigate} />}
-        {activeTab === "reports" && <ReportsTab />}
-        {activeTab === "settings" && <SettingsTab />}
+            className={`relative py-2.5 text-[11px] font-medium flex flex-col items-center gap-1 ${
+              isNewSalesActive ? "text-emerald-600 dark:text-emerald-400" : "text-gray-500 dark:text-gray-400"
+            }`}
+          >
+            <ShoppingCart className="h-5 w-5" />
+            <span>New Sales</span>
+            {(queue.failed > 0 || queue.dead > 0) && (
+              <span
+                className="absolute right-3 top-2 h-2.5 w-2.5 rounded-full bg-red-500"
+                title="Some sync items failed and need attention"
+              />
+            )}
+          </button>
+          <button
+            onClick={() => {
+              navigate("/inventory");
+              setMobileMoreOpen(false);
+            }}
+            className="py-1.5 text-[11px] font-semibold flex flex-col items-center gap-1 text-white"
+          >
+            <span className={`h-10 w-10 rounded-full flex items-center justify-center ${
+              isInventoryActive ? "btn-primary-gradient" : "bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-300"
+            }`}>
+              <Package className="h-5 w-5" />
+            </span>
+            <span className={isInventoryActive ? "text-emerald-600 dark:text-emerald-400" : "text-gray-500 dark:text-gray-400"}>
+              Inventory
+            </span>
+          </button>
+          <button
+            onClick={() => handleMobilePrimaryTab("credit")}
+            className={`py-2.5 text-[11px] font-medium flex flex-col items-center gap-1 ${
+              activeTab === "credit"
+                ? "text-emerald-600 dark:text-emerald-400"
+                : "text-gray-500 dark:text-gray-400"
+            }`}
+          >
+            <CreditCard className="h-5 w-5" />
+            <span>Credit</span>
+          </button>
+          <button
+            onClick={() => setMobileMoreOpen((v) => !v)}
+            className={`relative py-2.5 text-[11px] font-medium flex flex-col items-center gap-1 ${
+              isMoreActive ? "text-emerald-600 dark:text-emerald-400" : "text-gray-500 dark:text-gray-400"
+            }`}
+          >
+            <ChevronDown className={`h-5 w-5 transition-transform ${mobileMoreOpen ? "rotate-180" : ""}`} />
+            <span>More</span>
+            {queue.total > 0 && (
+              <span className="absolute right-3 top-1 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-emerald-600 text-white text-[10px] leading-none font-semibold">
+                {queue.total > 99 ? "99+" : queue.total}
+              </span>
+            )}
+          </button>
+        </div>
       </div>
+
+      {/* Mobile "More" bottom sheet */}
+      {mobileMoreOpen && (
+        <div className="sm:hidden fixed inset-0 z-50">
+          <button
+            aria-label="Close menu"
+            onClick={() => setMobileMoreOpen(false)}
+            className="absolute inset-0 bg-black/35"
+          />
+          <div className="absolute inset-x-0 bottom-0 rounded-t-2xl bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 shadow-2xl p-4 pb-6">
+            <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-gray-300 dark:bg-gray-600" />
+            <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">More</h3>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => {
+                  navigate("/inventory");
+                  setMobileMoreOpen(false);
+                }}
+                className="px-3 py-2.5 rounded-lg border border-gray-200 dark:border-gray-700 text-left text-sm text-gray-700 dark:text-gray-200 flex items-center gap-2"
+              >
+                <Package className="h-4 w-4" />
+                <span>Inventory</span>
+              </button>
+              {mobileMoreTabs.map((id) => {
+                const tab = TABS.find((t) => t.id === id);
+                if (!tab) return null;
+                const TabIcon = tab.icon;
+                return (
+                  <button
+                    key={id}
+                    onClick={() => {
+                      handleTabSelect(id);
+                      setMobileMoreOpen(false);
+                    }}
+                    className={`px-3 py-2.5 rounded-lg border text-left text-sm flex items-center gap-2 ${
+                      activeTab === id
+                        ? "border-emerald-300 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300"
+                        : "border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200"
+                    }`}
+                  >
+                    <TabIcon className="h-4 w-4" />
+                    <span>{tab.label}</span>
+                  </button>
+                );
+              })}
+              <button
+                onClick={() => {
+                  navigate("/sync-center");
+                  setMobileMoreOpen(false);
+                }}
+                className="px-3 py-2.5 rounded-lg border border-gray-200 dark:border-gray-700 text-left text-sm text-gray-700 dark:text-gray-200 flex items-center justify-between gap-2"
+              >
+                <span className="inline-flex items-center gap-2">
+                  <ArrowRightLeft className="h-4 w-4" />
+                  <span>Sync Center</span>
+                </span>
+                {queue.total > 0 && (
+                  <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-emerald-600 text-white text-[10px] font-semibold">
+                    {queue.total > 99 ? "99+" : queue.total}
+                  </span>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -143,6 +143,9 @@ function AuthenticatedHomeRedirect() {
 
 export default function AppRoutes() {
   const { user } = useAuth();
+  const location = useLocation();
+  const needsMobileBottomPadding =
+    Boolean(user) && !location.pathname.startsWith("/super-admin") && location.pathname !== "/dashboard";
 
   return (
     <>
@@ -154,6 +157,7 @@ export default function AppRoutes() {
       </Routes>
 
       <Suspense fallback={<PageLoader />}>
+        <div className={needsMobileBottomPadding ? "pb-24 sm:pb-0" : ""}>
         <Routes>
           {/* Public routes */}
           <Route
@@ -243,6 +247,7 @@ export default function AppRoutes() {
           {/* Fallback */}
           <Route path="*" element={<NotFoundPage />} />
         </Routes>
+        </div>
       </Suspense>
     </>
   );
