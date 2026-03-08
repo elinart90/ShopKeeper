@@ -8,6 +8,8 @@ import { replaceProductsCache, getCachedProducts } from '../../../offline/invent
 interface Product {
   id: string;
   name: string;
+  category_id?: string | null;
+  category?: { id?: string; name?: string } | null;
   barcode?: string;
   sku?: string;
   selling_price: number;
@@ -18,6 +20,11 @@ interface Product {
   is_active: boolean;
   created_at?: string;
   updated_at?: string;
+}
+
+interface Category {
+  id: string;
+  name: string;
 }
 
 export default function InventoryList() {
@@ -31,9 +38,11 @@ export default function InventoryList() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [products, setProducts] = useState<Product[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
-  const [filter, setFilter] = useState<'all' | 'low_stock' | 'out_of_stock' | 'deleted'>('all');
+  const [filter, setFilter] = useState<'all' | 'low_stock' | 'out_of_stock' | 'items_left' | 'deleted'>('all');
+  const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [usingCache, setUsingCache] = useState(false);
 
   const today = new Date().toISOString().slice(0, 10);
@@ -54,6 +63,59 @@ export default function InventoryList() {
       }, 0),
     [movements]
   );
+
+  const categoryNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    categories.forEach((c) => map.set(String(c.id), c.name));
+    return map;
+  }, [categories]);
+
+  const selectedCategoryLabel = useMemo(() => {
+    if (selectedCategory === 'all') return 'All categories';
+    if (selectedCategory === 'uncategorized') return 'Uncategorized';
+    return categoryNameById.get(selectedCategory) || 'Category';
+  }, [selectedCategory, categoryNameById]);
+
+  const hasActiveFilters = useMemo(
+    () => Boolean(searchQuery.trim()) || filter !== 'all' || selectedCategory !== 'all',
+    [searchQuery, filter, selectedCategory]
+  );
+
+  const normalizeCategoryId = (product: Product) => {
+    const raw = product.category_id ?? product.category?.id ?? null;
+    return raw ? String(raw) : null;
+  };
+
+  const productCategoryLabel = (product: Product) => {
+    const categoryId = normalizeCategoryId(product);
+    if (!categoryId) return 'Uncategorized';
+    return categoryNameById.get(categoryId) || product.category?.name || 'Uncategorized';
+  };
+
+  const applyCategoryFilter = (list: Product[]) => {
+    if (selectedCategory === 'all') return list;
+    if (selectedCategory === 'uncategorized') {
+      return list.filter((p) => !normalizeCategoryId(p));
+    }
+    return list.filter((p) => normalizeCategoryId(p) === selectedCategory);
+  };
+
+  const applyStatusFilter = (list: Product[]) => {
+    if (filter === 'deleted') {
+      return list.filter((p) => p.is_active === false);
+    }
+    let next = list.filter((p) => p.is_active !== false);
+    if (filter === 'low_stock') {
+      next = next.filter((p) => Number(p.stock_quantity) <= Number(p.min_stock_level || 0));
+    }
+    if (filter === 'out_of_stock') {
+      next = next.filter((p) => Number(p.stock_quantity) <= 0);
+    }
+    if (filter === 'items_left') {
+      next = next.filter((p) => Number(p.stock_quantity) > 0);
+    }
+    return next;
+  };
 
   const loadMovements = async (from: string, to: string) => {
     if (!currentShop) return;
@@ -77,14 +139,56 @@ export default function InventoryList() {
     if (currentShop) {
       loadProducts();
     }
-  }, [currentShop, filter]);
+  }, [currentShop, filter, selectedCategory]);
 
   useEffect(() => {
     const urlFilter = searchParams.get('filter');
-    if (urlFilter === 'low_stock' || urlFilter === 'out_of_stock' || urlFilter === 'all' || urlFilter === 'deleted') {
+    if (
+      urlFilter === 'low_stock' ||
+      urlFilter === 'out_of_stock' ||
+      urlFilter === 'items_left' ||
+      urlFilter === 'all' ||
+      urlFilter === 'deleted'
+    ) {
       setFilter(urlFilter);
     }
   }, [searchParams]);
+
+  useEffect(() => {
+    if (!currentShop?.id) return;
+    const key = `inventory_category_filter_${currentShop.id}`;
+    const saved = localStorage.getItem(key);
+    if (!saved) {
+      setSelectedCategory('all');
+      return;
+    }
+    setSelectedCategory(saved);
+  }, [currentShop?.id]);
+
+  useEffect(() => {
+    if (!currentShop?.id) return;
+    const key = `inventory_category_filter_${currentShop.id}`;
+    localStorage.setItem(key, selectedCategory);
+  }, [currentShop?.id, selectedCategory]);
+
+  const loadCategories = async () => {
+    if (!currentShop) return;
+    try {
+      const res = await inventoryApi.getCategories();
+      const data = ((res.data as any)?.data || []) as Category[];
+      setCategories(data);
+      if (
+        selectedCategory !== 'all' &&
+        selectedCategory !== 'uncategorized' &&
+        !data.some((c) => String(c.id) === String(selectedCategory))
+      ) {
+        setSelectedCategory('all');
+      }
+    } catch (error) {
+      console.error('Failed to load categories', error);
+      setCategories([]);
+    }
+  };
 
   const loadProducts = async () => {
     if (!currentShop) return;
@@ -96,8 +200,9 @@ export default function InventoryList() {
       lowStock: filter === 'low_stock',
       outOfStock: filter === 'out_of_stock',
     });
-    if (cached.length > 0) {
-      setProducts(cached as Product[]);
+    const cachedFiltered = applyStatusFilter(applyCategoryFilter(cached as Product[]));
+    if (cachedFiltered.length > 0) {
+      setProducts(cachedFiltered as Product[]);
       setUsingCache(true);
       setLoading(false);
     }
@@ -106,18 +211,16 @@ export default function InventoryList() {
     try {
       const params: any = {};
       if (searchQuery) { params.search = searchQuery; }
+      if (selectedCategory !== 'all' && selectedCategory !== 'uncategorized') {
+        params.category_id = selectedCategory;
+      }
       if (filter === 'low_stock') { params.low_stock = true; }
       if (filter === 'deleted') { params.is_active = false; }
       else { params.is_active = true; }
 
       const response = await inventoryApi.getProducts(params);
       let productsData = response.data.data || [];
-      if (filter !== 'deleted') {
-        productsData = productsData.filter((p: Product) => p.is_active !== false);
-      }
-      if (filter === 'out_of_stock') {
-        productsData = productsData.filter((p: Product) => p.stock_quantity === 0);
-      }
+      productsData = applyStatusFilter(applyCategoryFilter(productsData));
       setProducts(productsData);
       setUsingCache(false);
       // Replace (not merge) so temp offline-* product IDs are cleaned up after a real sync.
@@ -141,7 +244,20 @@ export default function InventoryList() {
     }, 300);
 
     return () => clearTimeout(timeoutId);
-  }, [searchQuery]);
+  }, [searchQuery, selectedCategory, currentShop]);
+
+  useEffect(() => {
+    if (currentShop) {
+      loadCategories();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentShop?.id]);
+
+  const clearAllFilters = () => {
+    setSearchQuery('');
+    setFilter('all');
+    setSelectedCategory('all');
+  };
 
   const handleDelete = async (productId: string) => {
     if (!confirm('Are you sure you want to delete this product?')) return;
@@ -216,18 +332,32 @@ export default function InventoryList() {
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
         {/* Filters */}
-        <div className="mb-6 flex flex-col sm:flex-row gap-4">
+        <div className="mb-3 flex flex-col gap-3">
           <div className="flex-1 relative">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
             <input
               type="text"
-              placeholder="Search products..."
+              placeholder="Search products, barcode, SKU..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
             />
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-col sm:flex-row gap-3">
+            <select
+              value={selectedCategory}
+              onChange={(e) => setSelectedCategory(e.target.value)}
+              className="px-3 py-2 min-w-[220px] border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200"
+            >
+              <option value="all">All categories</option>
+              <option value="uncategorized">Uncategorized</option>
+              {categories.map((category) => (
+                <option key={category.id} value={category.id}>
+                  {category.name}
+                </option>
+              ))}
+            </select>
+            <div className="flex gap-2 overflow-x-auto">
             <button
               onClick={() => setFilter('all')}
               className={`px-4 py-2 rounded-lg transition ${
@@ -260,6 +390,16 @@ export default function InventoryList() {
               Out of Stock
             </button>
             <button
+              onClick={() => setFilter('items_left')}
+              className={`px-4 py-2 rounded-lg transition ${
+                filter === 'items_left'
+                  ? 'bg-emerald-600 text-white'
+                  : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600'
+              }`}
+            >
+              Items Left
+            </button>
+            <button
               onClick={() => setFilter('deleted')}
               className={`px-4 py-2 rounded-lg transition ${
                 filter === 'deleted'
@@ -269,7 +409,57 @@ export default function InventoryList() {
             >
               Deleted
             </button>
+            </div>
+            {hasActiveFilters && (
+              <button
+                onClick={clearAllFilters}
+                className="px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800"
+              >
+                Clear filters
+              </button>
+            )}
           </div>
+        </div>
+
+        {hasActiveFilters && (
+          <div className="mb-4 flex flex-wrap items-center gap-2">
+            {selectedCategory !== 'all' && (
+              <button
+                onClick={() => setSelectedCategory('all')}
+                className="px-2.5 py-1 text-xs rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
+              >
+                Category: {selectedCategoryLabel} x
+              </button>
+            )}
+            {filter !== 'all' && (
+              <button
+                onClick={() => setFilter('all')}
+                className="px-2.5 py-1 text-xs rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300"
+              >
+                Status: {filter.replace('_', ' ')} x
+              </button>
+            )}
+            {searchQuery.trim() && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="px-2.5 py-1 text-xs rounded-full bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-200"
+              >
+                Search: "{searchQuery.trim()}" x
+              </button>
+            )}
+            <button
+              onClick={clearAllFilters}
+              className="px-2.5 py-1 text-xs rounded-full border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300"
+            >
+              Clear all
+            </button>
+          </div>
+        )}
+
+        <div className="mb-4 text-sm text-gray-600 dark:text-gray-400">
+          Showing <span className="font-semibold text-gray-900 dark:text-white">{products.length}</span>{' '}
+          {products.length === 1 ? 'product' : 'products'}
+          {selectedCategory !== 'all' ? ` in "${selectedCategoryLabel}"` : ''}
         </div>
 
         {/* Products List */}
@@ -284,8 +474,10 @@ export default function InventoryList() {
               No products found
             </h3>
             <p className="text-gray-600 dark:text-gray-400 mb-6">
-              {searchQuery
-                ? 'Try adjusting your search query'
+              {selectedCategory !== 'all'
+                ? `No products in "${selectedCategoryLabel}" for this shop.`
+                : searchQuery
+                ? 'Try changing category, status, or search.'
                 : 'Get started by adding your first product'}
             </p>
             {!searchQuery && (
@@ -340,6 +532,9 @@ export default function InventoryList() {
                           <div>
                             <div className="text-sm font-medium text-gray-900 dark:text-white">
                               {product.name}
+                            </div>
+                            <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                              Category: {productCategoryLabel(product)}
                             </div>
                             {isOutOfStock(product) ? (
                               <div className="inline-flex items-center gap-1 text-xs text-red-700 dark:text-red-300 mt-1 px-2 py-0.5 rounded bg-red-100 dark:bg-red-900/30">
