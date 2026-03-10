@@ -676,7 +676,7 @@ export default function Home() {
       </div>
 
       {/* Content */}
-      <div className="p-4 pb-24 sm:pb-4 max-w-7xl mx-auto min-h-[320px]">
+      <div className="p-4 pb-24 sm:pb-4 w-full min-h-[320px]">
         <div className="hidden sm:grid grid-cols-[260px_minmax(0,1fr)] gap-4">
           <aside className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white/90 dark:bg-slate-900/80 shadow-sm p-3 h-fit sticky top-24 transition-all duration-200 ease-[cubic-bezier(0.22,1,0.36,1)]">
             <div className="mb-2 px-2 text-[10px] tracking-[0.18em] font-semibold text-gray-500 dark:text-gray-400 uppercase">
@@ -1488,7 +1488,7 @@ function MoneyFlowTab({
 
   if (walletsError) {
     return (
-      <div className="max-w-2xl p-6 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
+      <div className="w-full p-6 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
         <h2 className="text-xl font-semibold text-amber-800 dark:text-amber-200 mb-2">Money Flow (Fintech)</h2>
         <p className="text-amber-700 dark:text-amber-300 mb-4">{walletsError}</p>
         <p className="text-sm text-amber-600 dark:text-amber-400">
@@ -1503,7 +1503,7 @@ function MoneyFlowTab({
   }
 
   return (
-    <div className="space-y-8 max-w-4xl">
+    <div className="space-y-8 w-full">
       <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Money Flow (Fintech)</h2>
 
       {/* Wallets */}
@@ -2759,7 +2759,7 @@ function StaffTab({
 
   if (!isOwner) {
     return (
-      <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl p-6 max-w-2xl">
+      <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl p-6 w-full">
         <h2 className="text-xl font-semibold text-amber-800 dark:text-amber-200 mb-2">
           Staff Performance & Controls
         </h2>
@@ -3775,7 +3775,7 @@ function ReportsTab() {
   };
 
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-8 max-w-2xl">
+    <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-8 w-full">
       <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
         Reports & Compliance
       </h2>
@@ -4523,7 +4523,7 @@ function SettingsTab() {
   };
 
   return (
-    <div className="space-y-6 max-w-2xl">
+    <div className="space-y-6 w-full">
       <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Settings</h2>
 
       {/* Sync center moved from header to settings */}
@@ -4849,3 +4849,6 @@ function SettingsTab() {
     </div>
   );
 }
+
+
+

@@ -233,7 +233,7 @@ export default function CreditTab({ onNavigate }: { onNavigate: (path: string) =
   };
 
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-6 sm:p-8 max-w-4xl">
+    <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-6 sm:p-8 w-full">
       <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
         Credit & Customer Risk
       </h2>
@@ -545,3 +545,4 @@ export default function CreditTab({ onNavigate }: { onNavigate: (path: string) =
     </div>
   );
 }
+

@@ -7,7 +7,7 @@ export default function AlertsTab() {
   ];
   return (
     <div
-      className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl border border-gray-200 dark:border-gray-700 p-6 sm:p-8 max-w-2xl w-full"
+      className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl border border-gray-200 dark:border-gray-700 p-6 sm:p-8 w-full"
       data-testid="alerts-insights-card"
       role="region"
       aria-label="Alerts and Insights"
