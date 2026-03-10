@@ -402,6 +402,7 @@ export default function AddProductPage() {
 
   const doSave = async (withStock: boolean) => {
     if (!validate()) return;
+  
     const payload = {
       name: form.name.trim(),
       barcode: form.barcode.trim() || undefined,
@@ -415,23 +416,24 @@ export default function AddProductPage() {
       description: form.description.trim() || undefined,
       image_url: form.image_url || undefined,
     };
-    setSaving(true);
+  
     try {
-      // 1. Write to local cache immediately with a temp ID (optimistic).
       const tempId = `offline-${Date.now()}`;
-      await cacheProducts(currentShop!.id, [{
-        id: tempId,
-        name: payload.name,
-        barcode: payload.barcode,
-        selling_price: Number(payload.selling_price || 0),
-        cost_price: Number(payload.cost_price || 0),
-        stock_quantity: Number((payload as any).stock_quantity || 0),
-        min_stock_level: Number(payload.min_stock_level || 0),
-        unit: payload.unit || 'piece',
-        is_active: true,
-      }]);
-
-      // 2. Enqueue the server write.
+  
+      await cacheProducts(currentShop!.id, [
+        {
+          id: tempId,
+          name: payload.name,
+          barcode: payload.barcode,
+          selling_price: Number(payload.selling_price || 0),
+          cost_price: Number(payload.cost_price || 0),
+          stock_quantity: Number(payload.stock_quantity || 0),
+          min_stock_level: Number(payload.min_stock_level || 0),
+          unit: payload.unit || 'piece',
+          is_active: true,
+        },
+      ]);
+  
       await enqueueOperation({
         entity: 'inventory',
         action: 'create',
@@ -441,15 +443,18 @@ export default function AddProductPage() {
         shopId: currentShop!.id,
         dedupeKey: `inventory:create:${payload.name}:${payload.barcode || tempId}`,
       });
-
-      // 3. Navigate immediately — no waiting for a server round-trip.
+  
       toast.success(withStock ? 'Product saved with initial stock' : 'Product saved');
       navigate('/inventory');
-
-      // 4. Kick off background sync — flushes queue immediately if online.
+  
       processQueueOnce().catch(() => {});
     } catch (err: any) {
-      const msg = err?.response?.data?.error?.message || err?.response?.data?.message || err?.message || 'Failed to save';
+      const msg =
+        err?.response?.data?.error?.message ||
+        err?.response?.data?.message ||
+        err?.message ||
+        'Failed to save';
+  
       toast.error(msg);
       setErrors({ submit: msg });
     } finally {
@@ -460,21 +465,37 @@ export default function AddProductPage() {
   };
 
   const handleSave = async (withStock: boolean) => {
+    if (saving) return;
     if (!validate()) return;
-    const hasDuplicate = await runDuplicateCheck();
-    if (hasDuplicate) {
-      setPendingSubmit({ withStock });
-      return;
+  
+    setSaving(true);
+  
+    try {
+      const hasDuplicate = await runDuplicateCheck();
+  
+      if (hasDuplicate) {
+        setPendingSubmit({ withStock });
+        setSaving(false);
+        return;
+      }
+  
+      await doSave(withStock);
+    } catch {
+      setSaving(false);
     }
-    await doSave(withStock);
   };
 
-  const handleConfirmSaveAnyway = () => {
+  const handleConfirmSaveAnyway = async () => {
     if (duplicateCheck?.existingByBarcode) {
       toast.error('Same barcode already exists. Open the existing product and update stock instead.');
       return;
     }
-    if (pendingSubmit) doSave(pendingSubmit.withStock);
+  
+    if (!pendingSubmit) return;
+    if (saving) return;
+  
+    setSaving(true);
+    await doSave(pendingSubmit.withStock);
   };
 
   const handleCreateCategory = async () => {
@@ -754,7 +775,7 @@ export default function AddProductPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-4 pb-44 md:pd-24">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-4 pb-44 md:pb-24">
       <div className="max-w-lg mx-auto">
         <Link to="/inventory" className="inline-flex items-center gap-2 text-gray-600 dark:text-gray-400 mb-4">
           <ArrowLeft className="h-4 w-4" /> Back

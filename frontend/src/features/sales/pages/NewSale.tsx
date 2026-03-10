@@ -97,6 +97,7 @@ export default function NewSale() {
   const qrCodeRegionId = 'qr-reader';
   const qrCodeFileRegionId = 'qr-reader-file';
   const voiceRef = useRef<SpeechRecognitionLike | null>(null);
+  const checkoutLockRef = useRef(false);
 
   const disposeScanner = (scanner: Html5Qrcode) => {
     Promise.resolve()
@@ -608,24 +609,33 @@ export default function NewSale() {
   };
 
   const handleCheckout = async () => {
+    if (checkoutLockRef.current || processing) return;
+  
     if (cart.length === 0) {
       toast.error('Cart is empty');
       return;
     }
-
+  
     const { subtotal, total } = calculateTotals();
+  
     if (discount > subtotal) {
       toast.error('Discount cannot exceed the subtotal');
       return;
     }
+  
     if (total < 0) {
       toast.error('Total cannot be negative');
       return;
     }
+  
     if (paymentMethod === 'credit' && !creditCustomerId) {
       toast.error('Select or add a customer for credit sales. They will appear in Dashboard → Credit & Risk.');
       return;
     }
+  
+    checkoutLockRef.current = true;
+    setProcessing(true);
+  
     const saleData: Record<string, unknown> = {
       items: cart.map(item => ({
         product_id: item.product_id,
@@ -636,41 +646,53 @@ export default function NewSale() {
       discount_amount: discount,
       payment_method: paymentMethod,
     };
+  
     if (paymentMethod === 'credit' && creditCustomerId) {
       saleData.customer_id = creditCustomerId;
     }
-
-    // Mobile Money / Card: Paystack takes over (customer number + PIN prompt on phone)
+  
     if (paymentMethod === 'mobile_money' || paymentMethod === 'card') {
       if (!online) {
         toast.error('Mobile money/card payments need internet connection.');
+        checkoutLockRef.current = false;
+        setProcessing(false);
         return;
       }
+  
       if (!user?.email) {
         toast.error('Add your email in Settings so we can use Paystack for this payment.');
+        checkoutLockRef.current = false;
+        setProcessing(false);
         return;
       }
-      setProcessing(true);
+  
       try {
-        const amountMinor = Math.round(total * 100); // pesewas/cents
+        const amountMinor = Math.round(total * 100);
+  
         if (amountMinor < 100) {
           toast.error('Minimum payment amount is 1.00');
+          checkoutLockRef.current = false;
           setProcessing(false);
           return;
         }
+  
         sessionStorage.setItem(PENDING_PAYSTACK_SALE_KEY, JSON.stringify(saleData));
+  
         const res = await paymentsApi.initializePaystack({
           amount: amountMinor,
           email: user.email,
           purpose: 'order',
           metadata: { source: 'pos_sale' },
         });
+  
         const url = res.data?.data?.authorization_url;
+  
         if (url) {
           toast.success('Redirecting to Paystack… Enter customer number and approve on their phone.');
           window.location.href = url;
           return;
         }
+  
         toast.error('Could not start payment');
         sessionStorage.removeItem(PENDING_PAYSTACK_SALE_KEY);
       } catch (err: any) {
@@ -678,18 +700,17 @@ export default function NewSale() {
         toast.error(msg);
         sessionStorage.removeItem(PENDING_PAYSTACK_SALE_KEY);
       } finally {
+        checkoutLockRef.current = false;
         setProcessing(false);
       }
+  
       return;
     }
-
-    // Offline-first: write to Dexie queue FIRST, show receipt instantly, sync in background.
-    setProcessing(true);
+  
     try {
       const offlineId = `offline-${Date.now()}`;
       const now = new Date().toISOString();
-
-      // 1. Build a local receipt so the UI can respond without waiting for the server.
+  
       const offlineSale = {
         id: offlineId,
         sale_number: `TMP-${Date.now().toString(36).toUpperCase()}`,
@@ -708,8 +729,7 @@ export default function NewSale() {
           ? { id: creditCustomerId, name: creditCustomerDisplay, phone: '' }
           : undefined,
       };
-
-      // 2. Write to Dexie queue FIRST — never blocked by the network.
+  
       await enqueueOperation({
         entity: 'sale',
         action: 'create',
@@ -719,18 +739,16 @@ export default function NewSale() {
         shopId: currentShop!.id,
         dedupeKey: `sale:create:${offlineId}`,
       });
-
-      // 3. Show receipt immediately (optimistic UI).
+  
       toast.success('Sale completed!');
       setReceiptPromptSale(offlineSale as any);
       setReceiptPhoneInput('');
-
-      // 4. Kick off background sync — if online this flushes the queue right now.
       processQueueOnce().catch(() => {});
     } catch (error: any) {
       toast.error('Failed to record sale');
       console.error(error);
     } finally {
+      checkoutLockRef.current = false;
       setProcessing(false);
     }
   };
