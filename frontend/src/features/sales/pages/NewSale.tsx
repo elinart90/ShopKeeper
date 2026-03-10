@@ -708,12 +708,13 @@ export default function NewSale() {
     }
   
     try {
-      const offlineId = `offline-${Date.now()}`;
       const now = new Date().toISOString();
-  
+      const checkoutAttemptId = `sale-${currentShop!.id}-${Date.now()}`;
+      const offlineId = `offline-${checkoutAttemptId}`;
+
       const offlineSale = {
         id: offlineId,
-        sale_number: `TMP-${Date.now().toString(36).toUpperCase()}`,
+        sale_number: `TMP-${checkoutAttemptId.toUpperCase()}`,
         created_at: now,
         payment_method: paymentMethod,
         total_amount: subtotal,
@@ -729,17 +730,20 @@ export default function NewSale() {
           ? { id: creditCustomerId, name: creditCustomerDisplay, phone: '' }
           : undefined,
       };
-  
+
       await enqueueOperation({
         entity: 'sale',
         action: 'create',
         method: 'post',
         url: '/sales',
-        payload: saleData,
+        payload: {
+          ...saleData,
+          client_sale_id: checkoutAttemptId,
+        },
         shopId: currentShop!.id,
-        dedupeKey: `sale:create:${offlineId}`,
+        dedupeKey: `sale:create:${checkoutAttemptId}`,
       });
-  
+
       toast.success('Sale completed!');
       setReceiptPromptSale(offlineSale as any);
       setReceiptPhoneInput('');

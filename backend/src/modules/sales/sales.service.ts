@@ -252,13 +252,44 @@ export class SalesService {
     }
 
     if (validated.payment_method === 'credit' && validated.customer_id) {
-      // Use a conditional UPDATE expression so concurrent credit sales
-      // for the same customer don't overwrite each other.
-      await supabase.rpc('increment_credit_balance', {
+      const { error: creditError } = await supabase.rpc('increment_credit_balance', {
         p_customer_id: validated.customer_id,
-        p_shop_id:     shopId,
-        p_amount:      finalAmount,
+        p_shop_id: shopId,
+        p_amount: finalAmount,
       });
+    
+      if (creditError) {
+        logger.error('increment_credit_balance RPC failed:', creditError);
+    
+        const { data: customer, error: customerFetchError } = await supabase
+          .from('customers')
+          .select('credit_balance')
+          .eq('id', validated.customer_id)
+          .eq('shop_id', shopId)
+          .single();
+    
+        if (customerFetchError || !customer) {
+          await supabase.from('sale_items').delete().eq('sale_id', sale.id);
+          await supabase.from('sales').delete().eq('id', sale.id);
+          throw new Error('Failed to load customer for credit update');
+        }
+    
+        const { error: customerUpdateError } = await supabase
+          .from('customers')
+          .update({
+            credit_balance: Number(customer.credit_balance || 0) + Number(finalAmount),
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', validated.customer_id)
+          .eq('shop_id', shopId);
+    
+        if (customerUpdateError) {
+          logger.error('Fallback customer credit update failed:', customerUpdateError);
+          await supabase.from('sale_items').delete().eq('sale_id', sale.id);
+          await supabase.from('sales').delete().eq('id', sale.id);
+          throw new Error('Failed to update customer credit balance');
+        }
+      }
     }
 
     return this.getSaleById(sale.id);
@@ -491,7 +522,7 @@ export class SalesService {
         await supabase
           .from('customers')
           .update({
-            credit_balance: Number(customer.credit_balance) - Number(sale.final_amount),
+            credit_balance: Math.max(0, Number(customer.credit_balance) - Number(sale.final_amount)),
             updated_at: new Date().toISOString(),
           })
           .eq('id', sale.customer_id);
