@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { ArrowLeft, Mail, Lock, Eye, EyeOff } from "lucide-react";
+import { ArrowLeft, Mail, Lock, Eye, EyeOff, Phone } from "lucide-react";
 import { authApi } from "../../../lib/api";
 import toast from "react-hot-toast";
 
@@ -9,7 +9,8 @@ export default function ForgotPasswordPage() {
   const initialEmail = (location.state as { email?: string })?.email ?? "";
 
   const [step, setStep] = useState<"email" | "pin" | "password" | "done">("email");
-  const [email, setEmail] = useState(initialEmail);
+  const [usePhone, setUsePhone] = useState(false);
+  const [identifier, setIdentifier] = useState(initialEmail);
   const [pin, setPin] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -19,16 +20,16 @@ export default function ForgotPasswordPage() {
 
   const handleSendPin = async (e: React.FormEvent) => {
     e.preventDefault();
-    const trimmed = email.trim();
+    const trimmed = identifier.trim();
     if (!trimmed) {
-      setError("Enter your email address");
+      setError(usePhone ? "Enter your phone number" : "Enter your email address");
       return;
     }
     setLoading(true);
     setError("");
     try {
       await authApi.forgotPasswordRequest(trimmed);
-      toast.success("If that email exists, a PIN was sent. Check your inbox (and spam folder).");
+      toast.success("If that account exists, a PIN was sent to your registered phone number via SMS.");
       setStep("pin");
     } catch (err: any) {
       setError(err?.response?.data?.error?.message || "Failed to send PIN. Try again.");
@@ -46,7 +47,7 @@ export default function ForgotPasswordPage() {
     setLoading(true);
     setError("");
     try {
-      await authApi.verifyForgotPasswordPin({ email: email.trim(), pin: pin.trim() });
+      await authApi.verifyForgotPasswordPin({ email: identifier.trim(), pin: pin.trim() });
       toast.success("PIN verified. Create your new password.");
       setStep("password");
     } catch (err: any) {
@@ -69,7 +70,7 @@ export default function ForgotPasswordPage() {
     }
     setLoading(true);
     try {
-      await authApi.forgotPasswordReset({ email: email.trim(), pin: pin.trim(), newPassword });
+      await authApi.forgotPasswordReset({ email: identifier.trim(), pin: pin.trim(), newPassword });
       toast.success("Password reset successfully. You can now sign in.");
       setStep("done");
     } catch (err: any) {
@@ -102,8 +103,8 @@ export default function ForgotPasswordPage() {
             Reset password
           </h1>
           <p className="text-gray-600 dark:text-gray-300 mt-2">
-            {step === "email" && "Enter your email to receive a 6-digit PIN"}
-            {step === "pin" && "Enter the 6-digit PIN sent to your email"}
+            {step === "email" && "Enter your email or phone to receive a 6-digit PIN"}
+            {step === "pin" && "Enter the 6-digit PIN sent to your phone via SMS"}
             {step === "password" && "Create your new password"}
             {step === "done" && "Your password has been reset"}
           </p>
@@ -118,30 +119,51 @@ export default function ForgotPasswordPage() {
 
           {step === "email" && (
             <form onSubmit={handleSendPin} className="space-y-6">
+              {/* Toggle */}
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => { setUsePhone(false); setIdentifier(initialEmail); setError(""); }}
+                  className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${!usePhone ? 'bg-emerald-500 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'}`}
+                >
+                  Email
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setUsePhone(true); setIdentifier(''); setError(""); }}
+                  className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${usePhone ? 'bg-emerald-500 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'}`}
+                >
+                  Phone number
+                </button>
+              </div>
+
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Email address
+                  {usePhone ? 'Phone number' : 'Email address'}
                 </label>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <Mail className="h-5 w-5 text-gray-400" />
+                    {usePhone ? <Phone className="h-5 w-5 text-gray-400" /> : <Mail className="h-5 w-5 text-gray-400" />}
                   </div>
                   <input
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
+                    type={usePhone ? 'tel' : 'email'}
+                    value={identifier}
+                    onChange={(e) => setIdentifier(e.target.value)}
                     className="block w-full pl-10 pr-3 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all"
-                    placeholder="Enter your email"
+                    placeholder={usePhone ? '0552017649' : 'Enter your email'}
                     required
                   />
                 </div>
                 <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
-                  Use a different email? Just type it above.
+                  {usePhone
+                    ? 'Enter the phone number linked to your account'
+                    : "We'll send a PIN to the phone number linked to this account"}
                 </p>
               </div>
+
               <button
                 type="submit"
-                disabled={loading || !email.trim()}
+                disabled={loading || !identifier.trim()}
                 className="w-full py-3 px-4 rounded-xl font-semibold text-white btn-primary-gradient disabled:opacity-70 disabled:cursor-not-allowed"
               >
                 {loading ? "Sending…" : "Send 6-digit PIN"}
@@ -167,7 +189,7 @@ export default function ForgotPasswordPage() {
                   autoFocus
                 />
                 <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
-                  Enter the PIN sent to {email || "your email"}
+                  Enter the PIN sent via SMS to the phone linked to {identifier || "your account"}
                 </p>
               </div>
               <button
@@ -182,7 +204,7 @@ export default function ForgotPasswordPage() {
                 onClick={() => setStep("email")}
                 className="w-full py-2 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
               >
-                Use a different email
+                Use a different email or phone
               </button>
             </form>
           )}
@@ -211,11 +233,7 @@ export default function ForgotPasswordPage() {
                     onClick={() => setShowPassword(!showPassword)}
                     className="absolute inset-y-0 right-0 pr-3 flex items-center"
                   >
-                    {showPassword ? (
-                      <EyeOff className="h-5 w-5 text-gray-400" />
-                    ) : (
-                      <Eye className="h-5 w-5 text-gray-400" />
-                    )}
+                    {showPassword ? <EyeOff className="h-5 w-5 text-gray-400" /> : <Eye className="h-5 w-5 text-gray-400" />}
                   </button>
                 </div>
               </div>

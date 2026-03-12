@@ -4326,7 +4326,7 @@ function SettingsTab() {
   const { user, setUserFromProfile, logout } = useAuth();
   const { themeMode, resolvedTheme, setThemeMode } = useTheme();
   const { currentShop } = useShop();
-  const [profileForm, setProfileForm] = useState({ name: user?.name ?? "", email: user?.email ?? "" });
+  const [profileForm, setProfileForm] = useState({ name: user?.name ?? "", email: user?.email ?? "", phone: "" });
   const [passwordForm, setPasswordForm] = useState({
     currentPassword: "",
     newPassword: "",

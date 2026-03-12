@@ -562,18 +562,32 @@ export default function NewSale() {
   };
 
   const addToCart = (product: any) => {
-    const existingItem = cart.find(item => item.product_id === product.id);
     const stock = Number(product.stock_quantity ?? 0);
-    
-    if (existingItem) {
-      if (stock > 0 && existingItem.quantity >= stock) {
-        toast.error('Insufficient stock');
-        return;
+  
+    setCart((prevCart) => {
+      const existingItem = prevCart.find((item) => item.product_id === product.id);
+  
+      if (existingItem) {
+        if (stock > 0 && existingItem.quantity >= stock) {
+          toast.error('Insufficient stock');
+          return prevCart;
+        }
+  
+        return prevCart.map((item) => {
+          if (item.product_id === product.id) {
+            const quantity = item.quantity + 1;
+            return {
+              ...item,
+              quantity,
+              total: (item.unit_price * quantity) - item.discount,
+            };
+          }
+          return item;
+        });
       }
-      updateCartItem(existingItem.id, { quantity: existingItem.quantity + 1 });
-    } else {
+  
       const newItem: CartItem = {
-        id: `item-${Date.now()}`,
+        id: `item-${Date.now()}-${product.id}`,
         product_id: product.id,
         name: product.name,
         barcode: product.barcode,
@@ -583,23 +597,26 @@ export default function NewSale() {
         total: Number(product.selling_price ?? 0),
         stock_quantity: stock,
       };
-      setCart([...cart, newItem]);
-    }
+  
+      return [...prevCart, newItem];
+    });
   };
 
   const updateCartItem = (itemId: string, updates: Partial<CartItem>) => {
-    setCart(cart.map(item => {
-      if (item.id === itemId) {
-        const updated = { ...item, ...updates };
-        updated.total = (updated.unit_price * updated.quantity) - updated.discount;
-        return updated;
-      }
-      return item;
-    }));
+    setCart((prevCart) =>
+      prevCart.map((item) => {
+        if (item.id === itemId) {
+          const updated = { ...item, ...updates };
+          updated.total = (updated.unit_price * updated.quantity) - updated.discount;
+          return updated;
+        }
+        return item;
+      })
+    );
   };
 
   const removeFromCart = (itemId: string) => {
-    setCart(cart.filter(item => item.id !== itemId));
+    setCart((prevCart) => prevCart.filter((item) => item.id !== itemId));
   };
 
   const calculateTotals = () => {

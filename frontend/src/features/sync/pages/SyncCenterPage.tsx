@@ -41,7 +41,7 @@ export default function SyncCenterPage() {
       const result = await processQueueOnce();
       toast.success(`Sync complete: ${result.processed} processed`);
     } finally {
-      setSyncingNow(false);
+      setSyncingNow(false); 
     }
   };
 

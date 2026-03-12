@@ -4,20 +4,18 @@ import { ShieldCheck, Smartphone, BarChart3, Package, TrendingUp, Zap, PieChart 
 import { useNavigate } from "react-router-dom";
 import logo from "../../../assets/shopkeeper-logo.png";
 
-// type WelcomeProps = {
-//   onNext?: () => void;
-// };
-
-function Dots({ total, current }: { total: number; current: number }) {
+function Dots({ total, current, onDotClick }: { total: number; current: number; onDotClick: (index: number) => void }) {
   return (
     <div className="flex items-center justify-center gap-2">
       {Array.from({ length: total }).map((_, i) => (
-        <span
+        <button
           key={i}
-          className={`h-2 w-2 rounded-full transition-all duration-300 ${
-            i === current 
-              ? "bg-gradient-to-r from-orange-500 to-yellow-500 w-6" 
-              : "bg-gray-300 dark:bg-gray-600"
+          type="button"
+          onClick={() => onDotClick(i)}
+          className={`h-2 rounded-full transition-all duration-300 cursor-pointer focus:outline-none ${
+            i === current
+              ? "bg-gradient-to-r from-orange-500 to-yellow-500 w-6"
+              : "bg-gray-300 dark:bg-gray-600 w-2 hover:bg-gray-400 dark:hover:bg-gray-500"
           }`}
         />
       ))}
@@ -26,8 +24,8 @@ function Dots({ total, current }: { total: number; current: number }) {
 }
 
 export default function Welcome() {
-  const navigate = useNavigate(); // Add this hook
-  
+  const navigate = useNavigate();
+
   const slides = useMemo(
     () => [
       {
@@ -64,7 +62,7 @@ export default function Welcome() {
       {
         title: "See Profit Clearly",
         desc: "Daily sales, expenses, and profit—ready for reports anytime.",
-        button: "Continue to Login", // CHANGED: Updated button text
+        button: "Continue to Login",
         icon: <TrendingUp className="h-10 w-10 sm:h-12 sm:w-12" />,
         bgGradient: "bg-gradient-to-br from-orange-600 via-orange-500 to-orange-400",
         features: [
@@ -83,26 +81,32 @@ export default function Welcome() {
 
   const handleNext = () => {
     setIsAnimating(true);
-    
     setTimeout(() => {
       if (step < slides.length - 1) {
         setStep((s) => s + 1);
       } else {
-        // CHANGED: Navigate to login page instead of onNext
         navigate("/sign-in");
       }
       setIsAnimating(false);
     }, 200);
   };
 
-  // CHANGED: Direct skip to login
+  const handleDotClick = (index: number) => {
+    if (index === step || isAnimating) return;
+    setIsAnimating(true);
+    setTimeout(() => {
+      setStep(index);
+      setIsAnimating(false);
+    }, 200);
+  };
+
   const handleSkipToLogin = () => {
     navigate("/sign-in");
   };
 
   return (
     <div className="fixed inset-0 bg-gradient-to-b from-gray-50 to-white dark:from-gray-900 dark:to-gray-800 overflow-hidden">
-      {/* Top colored area - fixed height */}
+      {/* Top colored area */}
       <div className={`relative overflow-hidden ${current.bgGradient} h-1/3 sm:h-2/5 transition-all duration-500`}>
         {/* Subtle pattern overlay */}
         <div className="absolute inset-0 opacity-10">
@@ -118,41 +122,35 @@ export default function Welcome() {
             WELCOME TO <span className="text-yellow-300">SHOPKEEPER</span>!
           </h1>
 
-          {/* Logo container - made more prominent */}
           <div className="relative">
-            {/* Logo shadow/glow effect */}
             <div className="absolute -inset-4 bg-white/20 rounded-full blur-xl animate-pulse"></div>
-            
-            {/* Logo box */}
             <div className="relative rounded-2xl bg-white/95 backdrop-blur-sm p-4 sm:p-6 shadow-2xl border-2 border-white/40">
               <div className="flex items-center justify-center">
-                  <img
-                    src={logo}
-                    alt="ShoopKeeper logo"
-                    className="h-12 sm:h-16 md:h-20 w-auto max-w-[280px]"
-                    draggable={false}
-                    onError={(e) => {
-                      // Fallback if logo doesn't load
-                      const target = e.target as HTMLImageElement;
-                      target.style.display = 'none';
-                      const parent = target.parentElement;
-                      if (parent) {
-                        const fallback = document.createElement('div');
-                        fallback.className = 'text-center';
-                        fallback.innerHTML = `
-                          <div class="text-3xl sm:text-4xl font-bold bg-gradient-to-r from-emerald-600 to-blue-600 bg-clip-text text-transparent">
-                            ShoopKeeper
-                          </div>
-                          <div class="text-sm text-gray-600 mt-1">Sell Smarter, Grow Faster</div>
-                        `;
-                        parent.appendChild(fallback);
-                      }
-                    }}
-                  />
-                </div>
+                <img
+                  src={logo}
+                  alt="ShopKeeper logo"
+                  className="h-12 sm:h-16 md:h-20 w-auto max-w-[280px]"
+                  draggable={false}
+                  onError={(e) => {
+                    const target = e.target as HTMLImageElement;
+                    target.style.display = 'none';
+                    const parent = target.parentElement;
+                    if (parent) {
+                      const fallback = document.createElement('div');
+                      fallback.className = 'text-center';
+                      fallback.innerHTML = `
+                        <div class="text-3xl sm:text-4xl font-bold bg-gradient-to-r from-emerald-600 to-blue-600 bg-clip-text text-transparent">
+                          ShopKeeper
+                        </div>
+                        <div class="text-sm text-gray-600 mt-1">Sell Smarter, Grow Faster</div>
+                      `;
+                      parent.appendChild(fallback);
+                    }
+                  }}
+                />
+              </div>
             </div>
 
-            {/* Trust badge - keep it in normal flow to avoid overlap */}
             <div className="mt-4 flex justify-center">
               <div className="relative">
                 <div className="absolute -inset-2 bg-gradient-to-r from-yellow-400 to-orange-500 rounded-full opacity-70 blur-md"></div>
@@ -171,11 +169,7 @@ export default function Welcome() {
 
         {/* Wave separator */}
         <div className="absolute bottom-0 left-0 right-0">
-          <svg
-            viewBox="0 0 1440 120"
-            className="w-full h-12 sm:h-16"
-            preserveAspectRatio="none"
-          >
+          <svg viewBox="0 0 1440 120" className="w-full h-12 sm:h-16" preserveAspectRatio="none">
             <path
               fill="white"
               className="text-gray-50 dark:text-gray-900"
@@ -183,31 +177,21 @@ export default function Welcome() {
             />
           </svg>
         </div>
-        
       </div>
-      {/* Content area - fixed height, no scroll */}
+
+      {/* Content area */}
       <div className="h-2/3 sm:h-3/5 pt-10 sm:pt-12">
         <div className="h-full flex flex-col max-w-md mx-auto px-4 sm:px-6">
-          {/* Slide content */}
-          <div 
+          <div
             key={step}
             className={`flex-1 flex flex-col justify-center transition-all duration-300 ${
               isAnimating ? 'opacity-0 transform translate-y-4' : 'opacity-100 transform translate-y-0'
             }`}
           >
-            {/* Icon */}
-            {/* <div className="flex justify-center mb-4 sm:mb-6">
-              <div className="p-3 sm:p-4 rounded-full bg-gradient-to-br from-white to-gray-100 dark:from-gray-800 dark:to-gray-700 shadow-lg">
-                {current.icon}
-              </div>
-            </div> */}
-
-            {/* Title */}
             <h2 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900 dark:text-gray-100 text-center mb-3 sm:mb-4 px-2">
               {current.title}
             </h2>
 
-            {/* Description */}
             <p className="text-sm sm:text-base text-gray-600 dark:text-gray-300 text-center mb-6 sm:mb-8 px-2">
               {current.desc}
             </p>
@@ -215,7 +199,7 @@ export default function Welcome() {
             {/* Progress bar */}
             <div className="mb-4 px-2">
               <div className="h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
-                <div 
+                <div
                   className="h-full bg-gradient-to-r from-emerald-500 to-blue-500 transition-all duration-500 rounded-full"
                   style={{ width: `${((step + 1) / slides.length) * 100}%` }}
                 ></div>
@@ -225,7 +209,7 @@ export default function Welcome() {
               </div>
             </div>
 
-            {/* Action button - positioned at bottom */}
+            {/* Action button */}
             <div className="mt-4 px-2">
               <button
                 className={`btn-african w-full py-3 sm:py-4 text-base sm:text-lg font-bold relative overflow-hidden ${
@@ -245,9 +229,9 @@ export default function Welcome() {
               </button>
             </div>
 
-            {/* Dots indicator */}
+            {/* Dots — clickable */}
             <div className="mt-4 sm:mt-6 px-2">
-              <Dots total={slides.length} current={step} />
+              <Dots total={slides.length} current={step} onDotClick={handleDotClick} />
             </div>
 
             {/* Skip option (only on first slide) */}
@@ -255,14 +239,14 @@ export default function Welcome() {
               <div className="mt-4 text-center">
                 <button
                   className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
-                  onClick={handleSkipToLogin} // CHANGED: Use new skip function
+                  onClick={handleSkipToLogin}
                 >
-                  Skip to Login {/* CHANGED: Updated text */}
+                  Skip to Login
                 </button>
               </div>
             )}
 
-            {/* Public app access QR */}
+            {/* QR code (only on first slide) */}
             {step === 0 && (
               <div className="mt-3 flex items-center justify-center gap-3 rounded-lg border border-gray-200 bg-white/80 p-2 dark:border-gray-700 dark:bg-gray-800/80">
                 <img
@@ -280,7 +264,7 @@ export default function Welcome() {
         </div>
       </div>
 
-      {/* Stats footer - fixed at bottom */}
+      {/* Stats footer */}
       <div className="absolute bottom-2 sm:bottom-4 left-0 right-0">
         <div className="max-w-md mx-auto px-4">
           <div className="flex justify-center items-center gap-3 sm:gap-6 text-[10px] sm:text-xs text-gray-500 dark:text-gray-400">

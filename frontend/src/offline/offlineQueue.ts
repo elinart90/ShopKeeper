@@ -76,12 +76,13 @@ export async function processQueueOnce() {
 async function processQueueInternal() {
   if (typeof navigator !== "undefined" && !navigator.onLine) return { processed: 0 };
 
-  // Recover items stuck in "processing" from a previous crashed/reloaded run.
-  // They were never completed, so reset them to "pending" so they get retried.
-  await offlineDb.syncQueue
-    .where("status")
-    .equals("processing")
-    .modify({ status: "pending", updatedAt: new Date().toISOString() });
+  // AFTER — only resets items stuck for more than 2 minutes
+const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+await offlineDb.syncQueue
+  .where("status")
+  .equals("processing")
+  .and((r) => r.updatedAt < twoMinutesAgo)
+  .modify({ status: "pending", updatedAt: new Date().toISOString() });
 
   const queue = await offlineDb.syncQueue
     .where("status")

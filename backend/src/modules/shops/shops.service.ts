@@ -5,6 +5,7 @@ import { logger } from '../../utils/logger';
 import { sendClearDataPinEmail } from '../../utils/email';
 import { env } from '../../config/env';
 import { AuthService } from '../auth/auth.service';
+import { sendSms } from '../../utils/sms';
 
 const DASHBOARD_EDIT_TOKEN_EXPIRY = '15m';
 
@@ -452,14 +453,27 @@ export class ShopsService {
       throw new Error('Failed to generate PIN');
     }
 
-    const { data: user } = await supabase.from('users').select('email').eq('id', userId).single();
+    const { data: user } = await supabase
+    .from('users')
+    .select('email, phone')
+    .eq('id', userId)
+    .single();
+
     const toEmail = (user as any)?.email;
-    if (toEmail) {
+    const toPhone = (user as any)?.phone;
+
+    if (toPhone) {
+      await sendSms(
+        toPhone,
+        `Your ShopKeeper dashboard edit PIN is: ${pin}. Valid for 10 minutes. Do not share.`
+      ).catch((err) => logger.warn(`[Dashboard edit] SMS failed for user ${userId}:`, err));
+    } else if (toEmail) {
       const sent = await sendClearDataPinEmail(toEmail, pin);
       if (!sent) logger.warn(`[Dashboard edit] PIN email failed for ${toEmail}; PIN: ${pin}`);
     }
-    return { message: 'PIN sent to your email. Check your inbox (and spam folder).' };
-  }
+
+    return { message: 'PIN sent to your registered phone via SMS (or email if no phone saved).' };
+      }
 
   /** Owner-only: verify PIN and return a short-lived token to use the dashboard edit interface. */
   async confirmDashboardEdit(shopId: string, userId: string, pin: string) {

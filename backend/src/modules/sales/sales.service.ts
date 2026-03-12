@@ -89,6 +89,21 @@ export class SalesService {
   async createSale(shopId: string, userId: string, data: any) {
     const validated = saleSchema.parse(data);
 
+    if (data.client_sale_id) {
+      const { data: existing } = await supabase
+        .from('sales')
+        .select('id')
+        .eq('shop_id', shopId)
+        .eq('client_sale_id', data.client_sale_id)
+        .maybeSingle();
+  
+      if (existing) {
+        logger.info(`Duplicate sale blocked: client_sale_id=${data.client_sale_id}`);
+        return this.getSaleById(existing.id);
+      }
+    }
+    // ─────────────────────────────────────────────────────────────────────
+
     let totalAmount = 0;
     const saleItems: Array<{
       product_id: string;
@@ -146,6 +161,7 @@ export class SalesService {
         status: 'completed',
         notes: validated.notes,
         created_by: userId,
+        client_sale_id: data.client_sale_id || null,
       })
       .select()
       .single();
