@@ -11,6 +11,7 @@ const logger_1 = require("../../utils/logger");
 const email_1 = require("../../utils/email");
 const env_1 = require("../../config/env");
 const auth_service_1 = require("../auth/auth.service");
+const sms_1 = require("../../utils/sms");
 const DASHBOARD_EDIT_TOKEN_EXPIRY = '15m';
 const authService = new auth_service_1.AuthService();
 const STAFF_ROLES = ['manager', 'cashier', 'staff'];
@@ -413,14 +414,22 @@ class ShopsService {
             logger_1.logger.error('Error saving PIN:', insertErr);
             throw new Error('Failed to generate PIN');
         }
-        const { data: user } = await supabase_1.supabase.from('users').select('email').eq('id', userId).single();
+        const { data: user } = await supabase_1.supabase
+            .from('users')
+            .select('email, phone')
+            .eq('id', userId)
+            .single();
         const toEmail = user?.email;
-        if (toEmail) {
+        const toPhone = user?.phone;
+        if (toPhone) {
+            await (0, sms_1.sendSms)(toPhone, `Your ShopKeeper dashboard edit PIN is: ${pin}. Valid for 10 minutes. Do not share.`).catch((err) => logger_1.logger.warn(`[Dashboard edit] SMS failed for user ${userId}:`, err));
+        }
+        else if (toEmail) {
             const sent = await (0, email_1.sendClearDataPinEmail)(toEmail, pin);
             if (!sent)
                 logger_1.logger.warn(`[Dashboard edit] PIN email failed for ${toEmail}; PIN: ${pin}`);
         }
-        return { message: 'PIN sent to your email. Check your inbox (and spam folder).' };
+        return { message: 'PIN sent to your registered phone via SMS (or email if no phone saved).' };
     }
     /** Owner-only: verify PIN and return a short-lived token to use the dashboard edit interface. */
     async confirmDashboardEdit(shopId, userId, pin) {

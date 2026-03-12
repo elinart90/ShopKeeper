@@ -9,6 +9,7 @@ const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const supabase_1 = require("../../config/supabase");
 const env_1 = require("../../config/env");
 const logger_1 = require("../../utils/logger");
+const sms_1 = require("../../utils/sms");
 const email_1 = require("../../utils/email");
 const errorHandler_1 = require("../../middleware/errorHandler");
 const SALT_ROUNDS = 10;
@@ -368,22 +369,36 @@ class AuthService {
      *  Stores the PIN in the shared pin_verifications table (purpose='password_reset', shop_id=null)
      *  — same table that Dashboard Edit uses, so no extra table creation is required.
      */
-    async forgotPasswordRequest(email) {
-        const normalizedEmail = (email || '').toLowerCase().trim();
-        if (!normalizedEmail)
-            throw new Error('Email is required');
-        const { data: user } = await supabase_1.supabase
-            .from('users')
-            .select('id, email')
-            .ilike('email', normalizedEmail)
-            .maybeSingle();
+    async forgotPasswordRequest(emailOrPhone) {
+        const input = (emailOrPhone || '').trim();
+        if (!input)
+            throw new Error('Email or phone is required');
+        const isPhone = /^\+?[\d\s]{7,15}$/.test(input);
+        let user = null;
+        if (isPhone) {
+            const normalized = input.replace(/\s+/g, '').replace(/^\+/, '');
+            const local = normalized.startsWith('233') ? '0' + normalized.slice(3) : normalized;
+            const { data } = await supabase_1.supabase
+                .from('users')
+                .select('id, email, phone')
+                .or(`phone.eq.${normalized},phone.eq.${local}`)
+                .maybeSingle();
+            user = data;
+        }
+        else {
+            const { data } = await supabase_1.supabase
+                .from('users')
+                .select('id, email, phone')
+                .ilike('email', input.toLowerCase())
+                .maybeSingle();
+            user = data;
+        }
         if (!user) {
-            return { message: 'If that email exists, a PIN was sent. Check your inbox.' };
+            return { message: 'If that account exists, a PIN was sent.' };
         }
         const pin = String(Math.floor(100000 + Math.random() * 900000));
         const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
         const PURPOSE = 'password_reset';
-        // Remove any existing password-reset PINs for this user.
         await supabase_1.supabase
             .from('pin_verifications')
             .delete()
@@ -402,10 +417,15 @@ class AuthService {
             logger_1.logger.error('Error saving password reset PIN:', insertErr);
             throw new Error('Failed to generate reset PIN');
         }
-        const sent = await (0, email_1.sendPasswordResetPinEmail)(user.email, pin);
-        if (!sent)
-            logger_1.logger.warn(`Password reset PIN email failed for ${user.email}`);
-        return { message: 'If that email exists, a PIN was sent. Check your inbox (and spam folder).' };
+        if (user.phone) {
+            await (0, sms_1.sendSms)(user.phone, `Your ShopKeeper password reset PIN is: ${pin}. Valid for 10 minutes. Do not share.`).catch((err) => logger_1.logger.warn(`SMS failed for user ${user.id}:`, err));
+        }
+        else {
+            const sent = await (0, email_1.sendPasswordResetPinEmail)(user.email, pin);
+            if (!sent)
+                logger_1.logger.warn(`Password reset PIN email failed for ${user.email}`);
+        }
+        return { message: 'If that account exists, a PIN was sent.' };
     }
     /** Verify forgot-password PIN without changing password. */
     async verifyForgotPasswordPin(email, pin) {

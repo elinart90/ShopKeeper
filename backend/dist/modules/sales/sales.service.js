@@ -72,6 +72,19 @@ class SalesService {
     }
     async createSale(shopId, userId, data) {
         const validated = validators_1.saleSchema.parse(data);
+        if (data.client_sale_id) {
+            const { data: existing } = await supabase_1.supabase
+                .from('sales')
+                .select('id')
+                .eq('shop_id', shopId)
+                .eq('client_sale_id', data.client_sale_id)
+                .maybeSingle();
+            if (existing) {
+                logger_1.logger.info(`Duplicate sale blocked: client_sale_id=${data.client_sale_id}`);
+                return this.getSaleById(existing.id);
+            }
+        }
+        // ─────────────────────────────────────────────────────────────────────
         let totalAmount = 0;
         const saleItems = [];
         for (const item of validated.items) {
@@ -114,6 +127,7 @@ class SalesService {
             status: 'completed',
             notes: validated.notes,
             created_by: userId,
+            client_sale_id: data.client_sale_id || null,
         })
             .select()
             .single();
@@ -193,13 +207,39 @@ class SalesService {
             await inventoryService.logStockMovement(shopId, item.product_id, userId, 'sale', item.quantity, oldQty, newQty, `Sale ${saleNumber}`);
         }
         if (validated.payment_method === 'credit' && validated.customer_id) {
-            // Use a conditional UPDATE expression so concurrent credit sales
-            // for the same customer don't overwrite each other.
-            await supabase_1.supabase.rpc('increment_credit_balance', {
+            const { error: creditError } = await supabase_1.supabase.rpc('increment_credit_balance', {
                 p_customer_id: validated.customer_id,
                 p_shop_id: shopId,
                 p_amount: finalAmount,
             });
+            if (creditError) {
+                logger_1.logger.error('increment_credit_balance RPC failed:', creditError);
+                const { data: customer, error: customerFetchError } = await supabase_1.supabase
+                    .from('customers')
+                    .select('credit_balance')
+                    .eq('id', validated.customer_id)
+                    .eq('shop_id', shopId)
+                    .single();
+                if (customerFetchError || !customer) {
+                    await supabase_1.supabase.from('sale_items').delete().eq('sale_id', sale.id);
+                    await supabase_1.supabase.from('sales').delete().eq('id', sale.id);
+                    throw new Error('Failed to load customer for credit update');
+                }
+                const { error: customerUpdateError } = await supabase_1.supabase
+                    .from('customers')
+                    .update({
+                    credit_balance: Number(customer.credit_balance || 0) + Number(finalAmount),
+                    updated_at: new Date().toISOString(),
+                })
+                    .eq('id', validated.customer_id)
+                    .eq('shop_id', shopId);
+                if (customerUpdateError) {
+                    logger_1.logger.error('Fallback customer credit update failed:', customerUpdateError);
+                    await supabase_1.supabase.from('sale_items').delete().eq('sale_id', sale.id);
+                    await supabase_1.supabase.from('sales').delete().eq('id', sale.id);
+                    throw new Error('Failed to update customer credit balance');
+                }
+            }
         }
         return this.getSaleById(sale.id);
     }
@@ -389,7 +429,7 @@ class SalesService {
                 await supabase_1.supabase
                     .from('customers')
                     .update({
-                    credit_balance: Number(customer.credit_balance) - Number(sale.final_amount),
+                    credit_balance: Math.max(0, Number(customer.credit_balance) - Number(sale.final_amount)),
                     updated_at: new Date().toISOString(),
                 })
                     .eq('id', sale.customer_id);

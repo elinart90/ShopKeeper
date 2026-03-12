@@ -73,7 +73,7 @@ export declare class AuthService {
      *  Stores the PIN in the shared pin_verifications table (purpose='password_reset', shop_id=null)
      *  — same table that Dashboard Edit uses, so no extra table creation is required.
      */
-    forgotPasswordRequest(email: string): Promise<{
+    forgotPasswordRequest(emailOrPhone: string): Promise<{
         message: string;
     }>;
     /** Verify forgot-password PIN without changing password. */
